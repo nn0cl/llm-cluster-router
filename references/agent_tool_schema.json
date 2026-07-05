@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OllamaClusterRouterTool",
+  "title": "LlmClusterRouterTool",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -10,7 +10,7 @@
     },
     "config_path": {
       "type": "string",
-      "description": "Path to an Ollama cluster config JSON file."
+      "description": "Path to an LLM cluster config JSON file with configured Ollama, OpenAI-compatible, Anthropic Claude, or Codex providers."
     },
     "allowed_root": {
       "type": "string",
@@ -35,6 +35,14 @@
         "max_tokens": {
           "type": "integer",
           "description": "Optional Anthropic Messages API max_tokens override."
+        },
+        "task_complexity": {
+          "type": "string",
+          "description": "Optional caller or skill classification such as easy, standard, hard, or agentic. Current manager behavior still routes by requested model and configured provider availability."
+        },
+        "routing_profile": {
+          "type": "string",
+          "description": "Optional caller or skill routing hint such as easy, hard, or agentic. Current manager behavior still routes by requested model and configured provider availability."
         },
         "options": {"type": "object", "additionalProperties": true}
       }

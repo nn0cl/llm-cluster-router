@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up the ollama-cluster-router skill package for use by an agent CLI on
+# Set up the llm-cluster-router skill package for use by an agent CLI on
 # this machine. The package itself (SKILL.md, scripts/, references/) stays a
 # portable artifact under this repo; this script only wires it up as a
 # discoverable skill somewhere else.
@@ -7,7 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SKILL_NAME="ollama-cluster-router"
+SKILL_NAME="llm-cluster-router"
 
 MODE="symlink"
 TARGETS=()
@@ -17,23 +17,23 @@ usage() {
   cat <<'EOF'
 Usage: setup_skill.sh [options]
 
-Wires up the ollama-cluster-router skill package (this directory) so an
+Wires up the llm-cluster-router skill package (this directory) so an
 agent CLI can discover and use it. The package stays a single portable
-artifact under skills/ollama-cluster-router/; this script only creates
+artifact under skills/llm-cluster-router/; this script only creates
 symlinks (or copies) pointing at it.
 
 Targets (repeatable, at least one required):
-  --claude-user              ~/.claude/skills/ollama-cluster-router
+  --claude-user              ~/.claude/skills/llm-cluster-router
                               (available to every Claude Code project for
                               this user).
-  --claude-project <path>    <path>/.claude/skills/ollama-cluster-router
+  --claude-project <path>    <path>/.claude/skills/llm-cluster-router
                               (available to Claude Code only inside <path>).
   --codex [<dest>]           Delegates to scripts/install_skill.py. <dest>
                               defaults to $CODEX_HOME/skills or
                               ~/.codex/skills, matching install_skill.py's
                               own default. Always copies (Codex reads its
                               skills directory independently of this repo).
-  --target <dir>             Install directly under <dir>/ollama-cluster-router
+  --target <dir>             Install directly under <dir>/llm-cluster-router
                               (advanced / custom tool skills directories).
 
 Options:
@@ -105,7 +105,7 @@ install_into() {
     copy)
       mkdir -p "${target_path}"
       # Copy contents (not the directory itself) so re-running is idempotent
-      # and does not nest ollama-cluster-router/ollama-cluster-router.
+      # and does not nest llm-cluster-router/llm-cluster-router.
       (cd "${SKILL_ROOT}" && tar cf - --exclude='__pycache__' --exclude='*.pyc' .) \
         | (cd "${target_path}" && tar xf -)
       echo "copied: ${target_path} (snapshot of ${SKILL_ROOT})"

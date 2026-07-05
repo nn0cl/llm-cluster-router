@@ -42,7 +42,7 @@ class FakeOllamaHttpClient:
         return response
 
 
-class OllamaClusterRouterSkillTests(unittest.TestCase):
+class LlmClusterRouterSkillTests(unittest.TestCase):
     def test_skill_artifacts_are_present_and_json_resources_parse(self):
         expected_paths = [
             SKILL_ROOT / "SKILL.md",
@@ -356,6 +356,247 @@ class OllamaClusterRouterSkillTests(unittest.TestCase):
         )
         self.assertEqual(http_client.post_calls[0][1]["model"], "claude-sonnet-4-5")
         self.assertEqual(http_client.post_calls[0][1]["system"], "Write concise code.")
+
+    def test_execute_task_routing_profile_selects_configured_claude_model(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {
+                    "provider": "ollama",
+                    "url": "http://local:11434",
+                    "priority": 100,
+                    "label": "local",
+                },
+                {
+                    "provider": "anthropic",
+                    "url": "https://api.anthropic.com",
+                    "priority": 10,
+                    "label": "claude",
+                    "models": ["claude-sonnet-4-5"],
+                },
+            ],
+            "routing": {
+                "profiles": {
+                    "hard": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-5",
+                    }
+                }
+            },
+        }
+        http_client = FakeOllamaHttpClient(
+            {
+                "http://local:11434/api/ps": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+                "http://local:11434/api/tags": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+            },
+            {
+                "http://local:11434/api/generate": {"response": "ollama generated\n"},
+                "https://api.anthropic.com/v1/messages": {
+                    "id": "msg_profile",
+                    "content": [{"type": "text", "text": "claude generated\n"}],
+                    "usage": {"input_tokens": 13, "output_tokens": 4},
+                },
+            },
+        )
+        task_package = {
+            "model": "qwen2.5-coder:7b",
+            "routing_profile": "hard",
+            "system_prompt": "Use the configured hard profile.",
+            "context": [],
+            "instruction": "Write a result.",
+        }
+
+        old_key = os.environ.get("ANTHROPIC_API_KEY")
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                manager = module.OllamaClusterManager(
+                    config, http_client=http_client, allowed_root=temp_dir
+                )
+                result = manager.execute_task(task_package, output_path="profile.txt")
+                output_path = Path(temp_dir) / "profile.txt"
+                output_text = output_path.read_text(encoding="utf-8")
+        finally:
+            if old_key is None:
+                os.environ.pop("ANTHROPIC_API_KEY", None)
+            else:
+                os.environ["ANTHROPIC_API_KEY"] = old_key
+
+        self.assertEqual(output_text, "claude generated\n")
+        self.assertEqual(result["provider"], "anthropic")
+        self.assertEqual(result["model"], "claude-sonnet-4-5")
+        self.assertEqual(result["routing_profile"], "hard")
+        self.assertEqual(
+            http_client.post_calls[0][0], "https://api.anthropic.com/v1/messages"
+        )
+        self.assertEqual(http_client.post_calls[0][1]["model"], "claude-sonnet-4-5")
+
+    def test_execute_task_task_complexity_selects_configured_codex_model(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {
+                    "provider": "ollama",
+                    "url": "http://local:11434",
+                    "priority": 100,
+                    "label": "local",
+                },
+                {
+                    "provider": "codex",
+                    "url": "local-codex-sdk",
+                    "priority": 10,
+                    "label": "codex",
+                    "models": ["gpt-5.4"],
+                },
+            ],
+            "routing": {
+                "profiles": {
+                    "agentic": {
+                        "provider": "codex",
+                        "model": "gpt-5.4",
+                    }
+                }
+            },
+        }
+        http_client = FakeOllamaHttpClient(
+            {
+                "http://local:11434/api/ps": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+                "http://local:11434/api/tags": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+            },
+            {"http://local:11434/api/generate": {"response": "ollama generated\n"}},
+        )
+        codex_calls = []
+
+        def fake_codex_sdk(host, task_package):
+            codex_calls.append((host, task_package))
+            return "codex generated\n", {"thread_id": "thread_test"}
+
+        original_codex_sdk = module.run_codex_sdk
+        module.run_codex_sdk = fake_codex_sdk
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                manager = module.OllamaClusterManager(
+                    config, http_client=http_client, allowed_root=temp_dir
+                )
+                task_package = {
+                    "model": "qwen2.5-coder:7b",
+                    "task_complexity": "agentic",
+                    "system_prompt": "Use the configured agentic profile.",
+                    "context": [],
+                    "instruction": "Write a result.",
+                }
+                result = manager.execute_task(task_package, output_path="codex.txt")
+                output_path = Path(temp_dir) / "codex.txt"
+                output_text = output_path.read_text(encoding="utf-8")
+        finally:
+            module.run_codex_sdk = original_codex_sdk
+
+        self.assertEqual(output_text, "codex generated\n")
+        self.assertEqual(result["provider"], "codex")
+        self.assertEqual(result["model"], "gpt-5.4")
+        self.assertEqual(result["task_complexity"], "agentic")
+        self.assertEqual(codex_calls[0][0]["provider"], "codex")
+        self.assertEqual(codex_calls[0][1]["model"], "gpt-5.4")
+
+    def test_execute_task_without_routing_hint_preserves_current_model_routing(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {"url": "http://cold:11434", "priority": 1, "label": "cold"},
+                {"url": "http://warm:11434", "priority": 99, "label": "warm"},
+            ],
+            "routing": {
+                "profiles": {
+                    "hard": {
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-5",
+                    }
+                }
+            },
+        }
+        http_client = FakeOllamaHttpClient(
+            {
+                "http://cold:11434/api/ps": {"models": []},
+                "http://cold:11434/api/tags": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+                "http://warm:11434/api/ps": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+                "http://warm:11434/api/tags": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+            },
+            {"http://warm:11434/api/generate": {"response": "selected = True\n"}},
+        )
+        task_package = {
+            "model": "qwen2.5-coder:7b",
+            "system_prompt": "No routing hint.",
+            "context": [],
+            "instruction": "write a marker",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = module.OllamaClusterManager(
+                config, http_client=http_client, allowed_root=temp_dir
+            )
+            result = manager.execute_task(task_package, output_path="marker.py")
+
+        self.assertEqual(result["provider"], "ollama")
+        self.assertEqual(result["host"], "http://warm:11434")
+        self.assertEqual(result["model"], "qwen2.5-coder:7b")
+        self.assertNotIn("routing_profile", result)
+        self.assertNotIn("task_complexity", result)
+        self.assertEqual(http_client.post_calls[0][0], "http://warm:11434/api/generate")
+
+    def test_execute_task_unknown_routing_profile_fails_before_provider_generation(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {
+                    "provider": "ollama",
+                    "url": "http://local:11434",
+                    "priority": 100,
+                    "label": "local",
+                }
+            ],
+            "routing": {"profiles": {}},
+        }
+        http_client = FakeOllamaHttpClient(
+            {
+                "http://local:11434/api/ps": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+                "http://local:11434/api/tags": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+            },
+            {"http://local:11434/api/generate": {"response": "should not run\n"}},
+        )
+        task_package = {
+            "model": "qwen2.5-coder:7b",
+            "routing_profile": "expensive",
+            "system_prompt": "Unknown profile.",
+            "context": [],
+            "instruction": "write a marker",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = module.OllamaClusterManager(
+                config, http_client=http_client, allowed_root=temp_dir
+            )
+            with self.assertRaises(module.RoutingError):
+                manager.execute_task(task_package, output_path="marker.py")
+
+        self.assertEqual(http_client.post_calls, [])
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 
-SKILL_NAME = "ollama-cluster-router"
+SKILL_NAME = "llm-cluster-router"
 REQUIRED_FILES = [
     "SKILL.md",
     "agents/openai.yaml",
@@ -68,7 +68,7 @@ def install_skill(source_root, destination_root):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Install ollama-cluster-router skill.")
+    parser = argparse.ArgumentParser(description="Install llm-cluster-router skill.")
     parser.add_argument(
         "--destination",
         default=str(default_codex_skills_dir()),

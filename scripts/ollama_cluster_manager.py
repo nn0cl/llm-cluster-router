@@ -127,22 +127,19 @@ class OllamaClusterManager:
 
     def execute_task(self, task_package, output_path):
         resolved_output = self.validate_output_path(output_path)
+        routed_task, routing_metadata = resolve_routing_profile(task_package, self.config)
         status = self.status_check()
-        host = self.choose_host(task_package["model"], status)
-        generated_text, response_metadata = self.generate_text(host, task_package)
+        host = self.choose_host(routed_task["model"], status, routed_task.get("provider"))
+        generated_text, response_metadata = self.generate_text(host, routed_task)
         resolved_output.parent.mkdir(parents=True, exist_ok=True)
         resolved_output.write_text(generated_text, encoding="utf-8")
-        result = {
-            "status": "success",
-            "provider": host["provider"],
-            "host": host["url"],
-            "host_label": host.get("label", host["url"]),
-            "model": task_package["model"],
-            "output_path": str(resolved_output),
-            "bytes_written": resolved_output.stat().st_size,
-        }
-        result.update(response_metadata)
-        return result
+        return build_execute_result(
+            host,
+            routed_task,
+            resolved_output,
+            routing_metadata,
+            response_metadata,
+        )
 
     def generate_text(self, host, task_package):
         provider = host["provider"]
@@ -189,9 +186,15 @@ class OllamaClusterManager:
             ) from error
         return resolved
 
-    def choose_host(self, requested_model, status):
+    def choose_host(self, requested_model, status, requested_provider=None):
         configured = {host["url"]: host for host in self.config["hosts"]}
         reachable = [host for host in status["hosts"] if host.get("ok")]
+        if requested_provider:
+            profile_host = choose_configured_profile_host(
+                self.config["hosts"], requested_provider, requested_model
+            )
+            if profile_host:
+                return profile_host
         loaded = [
             host for host in reachable if requested_model in host.get("loaded_models", [])
         ]
@@ -256,6 +259,68 @@ def normalize_config(config):
     normalized = dict(config)
     normalized["hosts"] = normalized_hosts
     return normalized
+
+
+def build_execute_result(
+    host,
+    routed_task,
+    resolved_output,
+    routing_metadata,
+    response_metadata,
+):
+    result = {
+        "status": "success",
+        "provider": host["provider"],
+        "host": host["url"],
+        "host_label": host.get("label", host["url"]),
+        "model": routed_task["model"],
+        "output_path": str(resolved_output),
+        "bytes_written": resolved_output.stat().st_size,
+    }
+    result.update(routing_metadata)
+    result.update(response_metadata)
+    return result
+
+
+def choose_configured_profile_host(hosts, requested_provider, requested_model):
+    configured_hosts = [
+        host
+        for host in hosts
+        if host["provider"] == requested_provider and host_supports_model(host, requested_model)
+    ]
+    if configured_hosts:
+        return best_host(configured_hosts)
+    return None
+
+
+def host_supports_model(host, requested_model):
+    return requested_model in host.get("models", [])
+
+
+def resolve_routing_profile(task_package, config):
+    if task_package.get("routing_profile"):
+        profile_name = task_package["routing_profile"]
+        metadata = {"routing_profile": profile_name}
+    elif task_package.get("task_complexity"):
+        profile_name = task_package["task_complexity"]
+        metadata = {"task_complexity": profile_name}
+    else:
+        return dict(task_package), {}
+
+    profiles = config.get("routing", {}).get("profiles", {})
+    profile = profiles.get(profile_name)
+    if not profile:
+        raise RoutingError(f"routing profile is not configured: {profile_name}")
+
+    provider = profile.get("provider")
+    model = profile.get("model")
+    if not provider or not model:
+        raise RoutingError(f"routing profile must include provider and model: {profile_name}")
+
+    routed_task = dict(task_package)
+    routed_task["provider"] = provider
+    routed_task["model"] = model
+    return routed_task, metadata
 
 
 def endpoint_url(base_url, path):

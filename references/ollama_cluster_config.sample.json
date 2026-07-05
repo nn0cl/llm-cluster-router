@@ -31,7 +31,8 @@
       "timeout_seconds": 60,
       "api_key_env": "ANTHROPIC_API_KEY",
       "anthropic_version": "2023-06-01",
-      "models": ["claude-sonnet-4-5"]
+      "models": ["claude-sonnet-4-5"],
+      "task_profiles": ["hard", "agentic", "long-context"]
     },
     {
       "label": "local-codex-sdk",
@@ -39,11 +40,26 @@
       "url": "local-codex-sdk",
       "priority": 3,
       "timeout_seconds": 60,
-      "models": ["gpt-5.4"]
+      "models": ["gpt-5.4"],
+      "task_profiles": ["agentic", "workspace-edit", "code-review"]
     }
   ],
   "defaults": {
     "allowed_root": ".",
     "keep_alive": "10m"
+  },
+  "routing_guidance": {
+    "easy": {
+      "preferred_provider": "ollama",
+      "notes": "Prefer configured local Ollama models for small, local, low-risk tasks."
+    },
+    "hard": {
+      "preferred_provider": "anthropic",
+      "notes": "Prefer configured Claude models for architecture-sensitive, ambiguous, or long-context reasoning tasks."
+    },
+    "agentic": {
+      "preferred_provider": "codex",
+      "notes": "Prefer configured Codex SDK models for multi-step workspace coding tasks when the SDK is available."
+    }
   }
 }

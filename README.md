@@ -4,9 +4,8 @@ Reusable agent tooling for routing model tasks across local Ollama hosts,
 OpenAI-compatible API calls, Anthropic Claude API calls, and the local Codex
 SDK.
 
-The current skill package name is `ollama-cluster-router` for compatibility
-with existing Codex and Claude Code skill installations. The repository name is
-broader because the router can now target multiple LLM providers.
+The skill package name is `llm-cluster-router`, matching the broader
+multi-provider scope of this repository.
 
 ## Contents
 
@@ -60,6 +59,16 @@ own config file.
 - `codex`: local Codex Python SDK. Requires `pip install openai-codex` in the
   environment that runs the router.
 
+Claude and Codex are first-class configuration targets. Add them as
+`provider: "anthropic"` and `provider: "codex"` host entries with their
+available `models`. The sample config also includes optional `task_profiles`
+and `routing_guidance` fields so the calling skill can classify a task before
+choosing the requested model.
+
+Current manager behavior routes by requested model, provider availability, and
+priority. Profile-based routing hints are for the calling agent until explicit
+profile routing is implemented in the manager.
+
 Example:
 
 ```sh
@@ -79,6 +88,8 @@ Task package shape:
   "system_prompt": "Write concise, reviewable code.",
   "context": [{"path": "example.py", "content": "def existing(): pass"}],
   "instruction": "Create the requested function.",
+  "task_complexity": "agentic",
+  "routing_profile": "agentic",
   "options": {}
 }
 ```
