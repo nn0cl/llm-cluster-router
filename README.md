@@ -97,6 +97,30 @@ client, matching `tty: false` on the `mcp-server` service in
 `docker-compose.yml`. Mount your own config/output directories as volumes;
 see the comments in `docker-compose.yml` for the pattern.
 
+## Release Archives
+
+`.gitattributes` marks AI-agent operating files (`AGENTS.md`, `CLAUDE.md`,
+`.github/copilot-instructions.md`, and the internal AI-TDD process
+directories under `docs/`: `at-tdd`, `collaboration`, `templates`, `issues`,
+`work-plans`, `evaluation`) as `export-ignore`. `docs/architecture` and
+`docs/specs` are kept since they document the router itself. Two ways this
+applies:
+
+- GitHub Release source archives (the automatic `.zip`/`.tar.gz` GitHub
+  builds from a tag) already exclude these paths — no extra step needed.
+- For distributing an archive outside GitHub Releases (or vendoring into
+  another project instead of adding this repo as a git submodule, which
+  would NOT respect `.gitattributes`), run:
+
+  ```sh
+  scripts/build_release_archive.sh [ref]
+  ```
+
+  This wraps `git archive` (defaulting to `HEAD`) and writes
+  `dist/llm-cluster-router-<short-sha>.tar.gz` and `.zip`. It reuses
+  `.gitattributes` as the single source of truth for exclusions rather than
+  keeping a separate list.
+
 ## Safety
 
 Always pass `--allowed-root` when running `execute_task`. The manager validates
