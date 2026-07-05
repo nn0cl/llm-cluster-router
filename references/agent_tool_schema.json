@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OllamaClusterRouterTool",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["status_check", "execute_task"]
+    },
+    "config_path": {
+      "type": "string",
+      "description": "Path to an Ollama cluster config JSON file."
+    },
+    "allowed_root": {
+      "type": "string",
+      "description": "Directory that output_path must resolve inside."
+    },
+    "output_path": {
+      "type": "string",
+      "description": "Relative or allowed absolute path for generated output."
+    },
+    "task_package": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["model", "system_prompt", "context", "instruction"],
+      "properties": {
+        "model": {"type": "string"},
+        "system_prompt": {"type": "string"},
+        "context": {
+          "type": "array",
+          "items": {"type": "object", "additionalProperties": true}
+        },
+        "instruction": {"type": "string"},
+        "options": {"type": "object", "additionalProperties": true}
+      }
+    }
+  },
+  "required": ["action"]
+}

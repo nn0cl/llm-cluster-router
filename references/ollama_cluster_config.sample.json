@@ -1,0 +1,20 @@
+{
+  "hosts": [
+    {
+      "label": "local-lan-primary",
+      "url": "http://192.168.0.30:11434",
+      "priority": 100,
+      "timeout_seconds": 30
+    },
+    {
+      "label": "local-lan-secondary",
+      "url": "http://192.168.0.136:11434",
+      "priority": 10,
+      "timeout_seconds": 30
+    }
+  ],
+  "defaults": {
+    "allowed_root": ".",
+    "keep_alive": "10m"
+  }
+}
