@@ -12,7 +12,7 @@
       "provider": "ollama",
       "url": "http://192.168.0.136:11434",
       "priority": 10,
-      "timeout_seconds": 30
+      "timeout_seconds": 180
     },
     {
       "label": "openai-api",

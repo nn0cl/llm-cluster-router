@@ -4,7 +4,7 @@
 
 - Local issue ID: LISS-0003
 - Title: Profile routing refactor
-- Status: review
+- Status: done
 - Phase: phase-3-refactor
 - Type: refactor
 - Priority: medium
@@ -33,6 +33,8 @@
 
 ## Referee Decision Points
 
-- Approve Phase 3 Refactor only after Green verification.
-- Decide whether larger module splitting is allowed or should remain a later
-  architecture decision.
+- Approve Phase 3 Refactor only after Green verification. (Approved: Referee
+  continued to LISS-0004 after this refactor.)
+- Whether larger module splitting is allowed remains an open architecture
+  decision (see CLAUDE.md "Current Non-Decisions"). Not addressed here; treat
+  as a future ADR topic, not an assumption.

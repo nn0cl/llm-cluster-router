@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -597,6 +599,34 @@ class LlmClusterRouterSkillTests(unittest.TestCase):
                 manager.execute_task(task_package, output_path="marker.py")
 
         self.assertEqual(http_client.post_calls, [])
+
+    def test_cli_status_check_runs_as_a_real_subprocess_with_codex_host(self):
+        config = {
+            "hosts": [
+                {
+                    "provider": "codex",
+                    "url": "local-codex-sdk",
+                    "priority": 10,
+                    "label": "codex",
+                    "models": ["gpt-5.4"],
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            process = subprocess.run(
+                [sys.executable, str(SCRIPT_PATH), "status_check", "--config", str(config_path)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(process.returncode, 0, msg=process.stderr)
+        result = json.loads(process.stdout)
+        self.assertEqual(result["hosts"][0]["provider"], "codex")
+        self.assertFalse(result["hosts"][0]["ok"])
+        self.assertEqual(result["hosts"][0]["errors"][0]["endpoint"], "codex-sdk")
 
 
 if __name__ == "__main__":

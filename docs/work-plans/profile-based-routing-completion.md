@@ -25,10 +25,10 @@
 
 | Issue | Status | Depends on | Blocks | Branch |
 | --- | --- | --- | --- | --- |
-| LISS-0001 | proposed | Referee spec approval | LISS-0002, LISS-0003 | feature/profile-based-routing |
-| LISS-0002 | proposed | LISS-0001 reviewed Red tests | LISS-0003, LISS-0004 | feature/profile-based-routing |
-| LISS-0003 | proposed | LISS-0002 verified Green | LISS-0004 | feature/profile-based-routing |
-| LISS-0004 | proposed | LISS-0002, optionally LISS-0003 | - | feature/profile-based-routing |
+| LISS-0001 | done | Referee spec approval | LISS-0002, LISS-0003 | feature/profile-based-routing |
+| LISS-0002 | done | LISS-0001 reviewed Red tests | LISS-0003, LISS-0004 | feature/profile-based-routing |
+| LISS-0003 | done | LISS-0002 verified Green | LISS-0004 | feature/profile-based-routing |
+| LISS-0004 | done | LISS-0002, optionally LISS-0003 | - | feature/profile-based-routing |
 
 ## Recommended Order
 
@@ -44,10 +44,14 @@
 
 ## Current Next Issue
 
-- Issue: LISS-0001
-- Reason it is unblocked: The draft acceptance spec and work plan now exist.
-- Referee approval needed: Approve the spec and Phase 1 Red before tests are
-  written.
+- None. LISS-0001 through LISS-0004 are all done: Red tests, Green
+  implementation, Refactor, and docs/install verification (including the
+  model routing catalog) are complete and merged to `main`.
+- Open, deliberately deferred: whether larger module splitting of
+  `scripts/ollama_cluster_manager.py` is allowed (LISS-0003), and whether
+  fallback routing or SaaS model discovery should be a future feature (see
+  `docs/specs/profile-based-routing.md` "Out of Scope" and "Ambiguities").
+  Treat both as future ADR/spec topics, not assumptions.
 
 ## Risks
 

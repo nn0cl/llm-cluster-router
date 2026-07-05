@@ -4,7 +4,7 @@
 
 - Local issue ID: LISS-0002
 - Title: Profile routing Green implementation
-- Status: review
+- Status: done
 - Phase: phase-2-green
 - Type: feature-implementation
 - Priority: high
@@ -35,6 +35,8 @@
 
 ## Referee Decision Points
 
-- Approve Phase 2 Green only after reviewing Red tests.
-- Decide whether the implementation may update the sample config contract from
-  `routing_guidance` to executable `routing.profiles`.
+- Approve Phase 2 Green only after reviewing Red tests. (Approved: Referee
+  continued to Phase 3 Refactor and then LISS-0004.)
+- Resolved in LISS-0004: keep `routing_guidance` and add executable
+  `routing.profiles` side by side rather than replacing it. See
+  `docs/collaboration/traces/2026-07-05-routing-docs-install-verification.md`.
