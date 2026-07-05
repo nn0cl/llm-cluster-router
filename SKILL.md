@@ -21,10 +21,13 @@ Use only providers configured by the user in the cluster config.
   agentic, multi-step workspace coding tasks when the SDK is available.
 - `openai`: OpenAI-compatible Responses API for configured OpenAI models.
 
-The current manager routes by requested model, provider availability, and
-provider priority. `task_complexity`, `routing_profile`, and
-`routing_guidance` are guidance for the calling agent until profile-based
-routing is implemented in the manager.
+The manager routes a task package by, in order: a matching `routing_profile`
+or `task_complexity` name found under the config's `routing.profiles` (sends
+the task straight to that profile's configured provider and model), then
+requested model, provider availability, and provider priority when no
+profile matches. `routing_guidance` remains descriptive-only: it helps the
+calling agent pick a `task_complexity` or `routing_profile` value but is not
+read by the manager itself.
 
 ## Workflow
 
@@ -33,7 +36,12 @@ routing is implemented in the manager.
 2. Classify the task before routing: use `easy` for small local tasks,
    `standard` for ordinary coding tasks, `hard` for ambiguous or
    architecture-sensitive tasks, and `agentic` for multi-step workspace coding
-   tasks. Use the configured provider guidance to choose the requested model.
+   tasks. Use the configured provider guidance (`routing_guidance`) to pick a
+   `routing_profile` or `task_complexity` value, and set the requested model
+   to match if the config does not define that profile. Pick the cheapest tier
+   that can still do the task; see
+   `docs/architecture/model-routing-catalog.md` for known models, their
+   relative cost tier and reasoning depth, and which profile each backs.
 3. Run `scripts/ollama_cluster_manager.py status_check` to inspect configured
    providers before routing.
 4. Prefer an Ollama host where the requested model is already loaded. If none

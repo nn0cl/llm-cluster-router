@@ -48,18 +48,43 @@
     "allowed_root": ".",
     "keep_alive": "10m"
   },
+  "routing": {
+    "default_profile": "easy",
+    "profiles": {
+      "easy": {
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b"
+      },
+      "standard": {
+        "provider": "openai",
+        "model": "gpt-5.4"
+      },
+      "hard": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5"
+      },
+      "agentic": {
+        "provider": "codex",
+        "model": "gpt-5.4"
+      }
+    }
+  },
   "routing_guidance": {
     "easy": {
       "preferred_provider": "ollama",
-      "notes": "Prefer configured local Ollama models for small, local, low-risk tasks."
+      "notes": "Prefer configured local Ollama models for small, local, low-risk tasks. Free and shallow reasoning depth; always try this tier first."
+    },
+    "standard": {
+      "preferred_provider": "openai",
+      "notes": "Prefer a configured OpenAI-compatible model for ordinary coding tasks that a local model handles poorly but that do not need deep reasoning. Paid, moderate reasoning depth."
     },
     "hard": {
       "preferred_provider": "anthropic",
-      "notes": "Prefer configured Claude models for architecture-sensitive, ambiguous, or long-context reasoning tasks."
+      "notes": "Prefer configured Claude models for architecture-sensitive, ambiguous, or long-context reasoning tasks. Paid, deep reasoning depth; use only when the task needs it."
     },
     "agentic": {
       "preferred_provider": "codex",
-      "notes": "Prefer configured Codex SDK models for multi-step workspace coding tasks when the SDK is available."
+      "notes": "Prefer configured Codex SDK models for multi-step workspace coding tasks when the SDK is available. Paid, deep reasoning depth with tool use."
     }
   }
 }

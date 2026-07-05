@@ -4,7 +4,7 @@
 
 - Local issue ID: LISS-0004
 - Title: Routing docs and install verification
-- Status: proposed
+- Status: done
 - Phase: docs-only
 - Type: documentation
 - Priority: medium
@@ -25,5 +25,16 @@
 
 ## Referee Decision Points
 
-- Decide whether docs should include pricing/reasoning-cost model catalog
-  examples or leave those to a later feature.
+- Resolved: keep `routing_guidance` alongside the new executable
+  `routing.profiles` config (documented as calling-agent-only guidance, not
+  read by the manager), rather than replacing it.
+- Resolved: docs include a relative-cost/reasoning-depth model catalog
+  (`docs/architecture/model-routing-catalog.md`), scoped to models already
+  named in this repo, without pricing numbers or benchmark scores. A new
+  `standard` profile (`openai` / `gpt-5.4`) was added to
+  `references/ollama_cluster_config.sample.json` so all four
+  `task_complexity` levels used in `SKILL.md` have a matching executable
+  profile, ordered cheapest-first for cost minimization.
+- See
+  `docs/collaboration/traces/2026-07-05-routing-docs-install-verification.md`
+  and its follow-up entry for both decisions.

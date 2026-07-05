@@ -8,11 +8,15 @@ For Codex, treat the configured `codex` provider as local Codex SDK access and
 confirm that the requested model is configured and the optional SDK dependency
 is available. Classify the task before routing: prefer local Ollama for easy
 local tasks, configured Claude for hard or long-context reasoning tasks, and
-configured Codex for agentic multi-step workspace coding tasks. The current
-manager routes by requested model, provider availability, and priority, so use
-the classification to choose the requested model from the user's config. Send
-only a compact JSON task package with the system prompt, selected context,
-instruction, model, optional task_complexity or routing_profile, and options.
+configured Codex for agentic multi-step workspace coding tasks. If the user's
+config defines a matching profile under `routing.profiles`, set
+`routing_profile` (or `task_complexity` as a fallback) to that profile name and
+the manager routes directly to its configured provider and model. Otherwise use
+the classification to choose the requested model from the user's config, since
+the manager falls back to routing by requested model, provider availability,
+and priority. Send only a compact JSON task package with the system prompt,
+selected context, instruction, model, optional task_complexity or
+routing_profile, and options.
 Write generated output directly to the requested path through the local manager
 inside the allowed root. Return metadata only unless the user asks to inspect
 the generated file.

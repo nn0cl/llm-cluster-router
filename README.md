@@ -65,9 +65,35 @@ available `models`. The sample config also includes optional `task_profiles`
 and `routing_guidance` fields so the calling skill can classify a task before
 choosing the requested model.
 
-Current manager behavior routes by requested model, provider availability, and
-priority. Profile-based routing hints are for the calling agent until explicit
-profile routing is implemented in the manager.
+The manager resolves profile-based routing from the config's `routing`
+section:
+
+```json
+{
+  "routing": {
+    "default_profile": "easy",
+    "profiles": {
+      "easy": {"provider": "ollama", "model": "qwen2.5-coder:7b"},
+      "standard": {"provider": "openai", "model": "gpt-5.4"},
+      "hard": {"provider": "anthropic", "model": "claude-sonnet-4-5"},
+      "agentic": {"provider": "codex", "model": "gpt-5.4"}
+    }
+  }
+}
+```
+
+When a task package sets `routing_profile` (or `task_complexity` as a
+fallback) to a name defined under `routing.profiles`, the manager routes the
+task to that profile's configured provider and model. Without a matching
+profile, the manager falls back to routing by requested model, provider
+availability, and priority. `routing_guidance` stays descriptive-only: it
+helps the calling agent pick a profile name, but the manager does not read it.
+
+Pick a profile from the cheapest tier that can still do the task: `easy` (free
+local model) first, then `standard`, `hard`, or `agentic` only when the task
+needs that tier's reasoning depth. See
+`docs/architecture/model-routing-catalog.md` for the known models, their
+relative cost tier and reasoning depth, and which profile each one backs.
 
 Example:
 
