@@ -1,0 +1,18 @@
+# Files excluded from `git archive` output (GitHub Release source archives,
+# and scripts/build_release_archive.sh, both use this). These are AI-agent
+# operating instructions and internal AI-TDD process artifacts, not part of
+# the router itself. Keep this the single source of truth for what a release
+# archive excludes; do not duplicate this list elsewhere.
+#
+# docs/architecture/ and docs/specs/ are NOT excluded: they document the
+# router's own design, not AI operating process, and are useful to a
+# downstream consumer of the released code.
+AGENTS.md export-ignore
+CLAUDE.md export-ignore
+.github/copilot-instructions.md export-ignore
+docs/at-tdd/ export-ignore
+docs/collaboration/ export-ignore
+docs/templates/ export-ignore
+docs/issues/ export-ignore
+docs/work-plans/ export-ignore
+docs/evaluation/ export-ignore
