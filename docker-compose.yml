@@ -1,0 +1,28 @@
+# Docker Compose launch for the optional MCP delivery adapter, for hosts
+# with no local Python install (see LISS-0006 and README.md "MCP Server
+# (optional)"). Point an MCP client's server "command" at:
+#
+#   docker compose run --rm -T mcp-server
+#
+# -T disables pseudo-tty allocation on the `run` side; tty: false below does
+# the same on the service side. Both are required so stdio stays clean
+# JSON-RPC for the MCP client instead of a TTY-mangled stream.
+services:
+  mcp-server:
+    build: .
+    stdin_open: true
+    tty: false
+    # Mount your own config and output/allowed-root directories, then pass
+    # the in-container paths as config_path/allowed_root MCP tool
+    # arguments (mcp_server.py's tools take these as arguments, not CLI
+    # flags). Example:
+    #
+    # volumes:
+    #   - ./my-config:/config:ro
+    #   - ./my-workspace:/workspace
+    #
+    # Or skip config_path entirely and rely on OLLAMA_CLUSTER_HOSTS for a
+    # simple Ollama-only setup:
+    #
+    # environment:
+    #   - OLLAMA_CLUSTER_HOSTS=http://192.168.0.30:11434,http://192.168.0.136:11434

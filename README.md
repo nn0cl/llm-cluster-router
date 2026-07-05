@@ -15,6 +15,10 @@ multi-provider scope of this repository.
 - `scripts/mcp_server.py`: optional MCP delivery adapter for MCP-only clients
   (see `docs/architecture/adr/0007-mcp-delivery-adapter.md`). Calls the same
   `OllamaClusterManager` as the CLI; adds no routing logic of its own.
+- `scripts/setup_mcp_venv.sh` / `scripts/run_mcp_server.sh`: venv-based MCP
+  launch for hosts that already have Python (LISS-0005).
+- `Dockerfile` / `docker-compose.yml`: Docker Compose MCP launch for hosts
+  without Python (LISS-0006).
 - `scripts/install_skill.py`: copies the skill into a Codex skills directory.
 - `scripts/setup_skill.sh`: wires the skill into Codex, Claude Code, or a custom
   skills directory.
@@ -55,16 +59,43 @@ installing the skill. This is additive: it does not replace the skill/CLI
 path, and both read the same config file and call the same
 `OllamaClusterManager`.
 
-```sh
-pip install -r requirements-mcp.txt
-python3 scripts/mcp_server.py
-```
-
 The server exposes two tools over stdio, `status_check` and `execute_task`,
 with the same arguments and result shape as the CLI actions of the same name
 and `references/agent_tool_schema.json`. See
 `docs/architecture/adr/0007-mcp-delivery-adapter.md` for the design decision
 and its tradeoffs.
+
+### Option A: venv launch (Python already installed)
+
+Point an MCP client's server "command" at `scripts/run_mcp_server.sh`. It
+creates a dedicated venv at `.venv/` on first run (delegating to
+`scripts/setup_mcp_venv.sh`), installs `requirements-mcp.txt` into it, and
+execs `scripts/mcp_server.py`. Safe to re-run.
+
+```sh
+scripts/run_mcp_server.sh
+```
+
+Manual/no-script alternative:
+
+```sh
+pip install -r requirements-mcp.txt
+python3 scripts/mcp_server.py
+```
+
+### Option B: Docker Compose launch (no local Python required)
+
+If the host running the MCP client has no Python at all, build and run the
+server in a container instead. Point the MCP client's server "command" at:
+
+```sh
+docker compose run --rm -T mcp-server
+```
+
+`-T` disables pseudo-tty allocation so stdio stays clean JSON-RPC for the
+client, matching `tty: false` on the `mcp-server` service in
+`docker-compose.yml`. Mount your own config/output directories as volumes;
+see the comments in `docker-compose.yml` for the pattern.
 
 ## Safety
 
