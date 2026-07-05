@@ -72,9 +72,11 @@ Current adapter candidates:
 
 ### Front-End / Delivery
 
-The delivery layer is currently CLI and agent skill metadata. It parses command
-arguments, reads task package files, invokes router behavior, and prints
-metadata results.
+The delivery layer is CLI plus agent skill metadata, plus an optional MCP
+server adapter (`scripts/mcp_server.py`, see
+`docs/architecture/adr/0007-mcp-delivery-adapter.md`) for MCP-only clients.
+All three parse their own transport's arguments, invoke the same
+`OllamaClusterManager` router behavior, and return metadata results.
 
 It must not own:
 
@@ -101,6 +103,8 @@ It must not own:
 - UI framework: none currently.
 - Package manager: none required for the current standard-library manager.
 - Optional dependency: `openai-codex` for the local Codex SDK adapter.
+- Optional dependency: `mcp` (`requirements-mcp.txt`) for the MCP delivery
+  adapter.
 - Distribution goal: portable skill package installable into Codex, Claude
   Code, or custom skill directories.
 

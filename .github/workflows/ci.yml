@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for n in 0001 0002 0003 0004 0005 0006; do
+          for n in 0001 0002 0003 0004 0005 0006 0007; do
             ls "docs/architecture/adr/${n}-"*.md >/dev/null
           done
 

@@ -1,0 +1,4 @@
+# Optional dependency for scripts/mcp_server.py.
+# Not required for scripts/ollama_cluster_manager.py or the agent skill package.
+# Install with: pip install -r requirements-mcp.txt
+mcp>=1.28.1

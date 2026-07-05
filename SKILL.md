@@ -8,6 +8,11 @@ description: Route AI coding tasks across Ollama hosts, OpenAI API, Anthropic Cl
 Use this skill when a task should run through a configured LLM provider,
 especially for code generation that can be written directly to the workspace.
 
+For MCP-only clients that cannot read this skill package, run
+`scripts/mcp_server.py` instead; it exposes the same `status_check` and
+`execute_task` actions as MCP tools over the same underlying manager. See
+`docs/architecture/adr/0007-mcp-delivery-adapter.md`.
+
 ## Configured Providers
 
 Use only providers configured by the user in the cluster config.

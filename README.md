@@ -12,6 +12,9 @@ multi-provider scope of this repository.
 - `SKILL.md`: agent-facing skill instructions.
 - `agents/openai.yaml`: OpenAI/Codex agent metadata.
 - `scripts/ollama_cluster_manager.py`: standard-library CLI and routing logic.
+- `scripts/mcp_server.py`: optional MCP delivery adapter for MCP-only clients
+  (see `docs/architecture/adr/0007-mcp-delivery-adapter.md`). Calls the same
+  `OllamaClusterManager` as the CLI; adds no routing logic of its own.
 - `scripts/install_skill.py`: copies the skill into a Codex skills directory.
 - `scripts/setup_skill.sh`: wires the skill into Codex, Claude Code, or a custom
   skills directory.
@@ -21,11 +24,14 @@ multi-provider scope of this repository.
 ## Test
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests/test_ollama_cluster_router_skill.py
-python3 -m py_compile scripts/ollama_cluster_manager.py scripts/install_skill.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests
+python3 -m py_compile scripts/ollama_cluster_manager.py scripts/install_skill.py scripts/mcp_server.py
 python3 -m json.tool references/ollama_cluster_config.sample.json >/dev/null
 python3 -m json.tool references/agent_tool_schema.json >/dev/null
 ```
+
+`tests/test_mcp_server.py` skips itself when the optional `mcp` package (see
+below) is not installed.
 
 ## Install
 
@@ -40,6 +46,25 @@ Set up for Claude Code or a custom skill directory:
 ```sh
 scripts/setup_skill.sh --help
 ```
+
+## MCP Server (optional)
+
+For MCP-only clients (for example Claude Desktop, or any MCP host that does
+not read agent skill packages), run the router as an MCP server instead of
+installing the skill. This is additive: it does not replace the skill/CLI
+path, and both read the same config file and call the same
+`OllamaClusterManager`.
+
+```sh
+pip install -r requirements-mcp.txt
+python3 scripts/mcp_server.py
+```
+
+The server exposes two tools over stdio, `status_check` and `execute_task`,
+with the same arguments and result shape as the CLI actions of the same name
+and `references/agent_tool_schema.json`. See
+`docs/architecture/adr/0007-mcp-delivery-adapter.md` for the design decision
+and its tradeoffs.
 
 ## Safety
 
