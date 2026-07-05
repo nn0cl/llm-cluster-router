@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,8 +34,8 @@ class FakeOllamaHttpClient:
             raise response
         return response
 
-    def post_json(self, url, payload, timeout_seconds):
-        self.post_calls.append((url, payload, timeout_seconds))
+    def post_json(self, url, payload, timeout_seconds, headers=None):
+        self.post_calls.append((url, payload, timeout_seconds, headers or {}))
         response = self.post_responses[url]
         if isinstance(response, Exception):
             raise response
@@ -237,6 +238,124 @@ class OllamaClusterRouterSkillTests(unittest.TestCase):
                 manager.execute_task(task_package, output_path="marker.py")
 
         self.assertEqual(http_client.post_calls, [])
+
+    def test_execute_task_can_route_to_openai_responses_api(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {
+                    "provider": "openai",
+                    "url": "https://api.openai.com",
+                    "priority": 10,
+                    "label": "openai",
+                    "models": ["gpt-5.4"],
+                }
+            ]
+        }
+        http_client = FakeOllamaHttpClient(
+            {},
+            {
+                "https://api.openai.com/v1/responses": {
+                    "id": "resp_test",
+                    "output_text": "openai generated\n",
+                    "usage": {"input_tokens": 11, "output_tokens": 3},
+                }
+            },
+        )
+        task_package = {
+            "model": "gpt-5.4",
+            "system_prompt": "Write concise code.",
+            "context": [{"path": "example.py", "content": "pass"}],
+            "instruction": "Write a result.",
+            "options": {"temperature": 0},
+        }
+
+        old_key = os.environ.get("OPENAI_API_KEY")
+        os.environ["OPENAI_API_KEY"] = "test-key"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                manager = module.OllamaClusterManager(
+                    config, http_client=http_client, allowed_root=temp_dir
+                )
+                result = manager.execute_task(task_package, output_path="openai.txt")
+                output_path = Path(temp_dir) / "openai.txt"
+                output_text = output_path.read_text(encoding="utf-8")
+        finally:
+            if old_key is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = old_key
+
+        self.assertEqual(output_text, "openai generated\n")
+        self.assertEqual(result["provider"], "openai")
+        self.assertEqual(result["response_id"], "resp_test")
+        self.assertEqual(http_client.post_calls[0][0], "https://api.openai.com/v1/responses")
+        self.assertEqual(
+            http_client.post_calls[0][3]["Authorization"], "Bearer test-key"
+        )
+        self.assertEqual(http_client.post_calls[0][1]["model"], "gpt-5.4")
+        self.assertEqual(http_client.post_calls[0][1]["input"][0]["role"], "developer")
+
+    def test_execute_task_can_route_to_anthropic_messages_api(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {
+                    "provider": "anthropic",
+                    "url": "https://api.anthropic.com",
+                    "priority": 10,
+                    "label": "claude",
+                    "models": ["claude-sonnet-4-5"],
+                }
+            ]
+        }
+        http_client = FakeOllamaHttpClient(
+            {},
+            {
+                "https://api.anthropic.com/v1/messages": {
+                    "id": "msg_test",
+                    "content": [{"type": "text", "text": "claude generated\n"}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 13, "output_tokens": 4},
+                }
+            },
+        )
+        task_package = {
+            "model": "claude-sonnet-4-5",
+            "system_prompt": "Write concise code.",
+            "context": [{"path": "example.py", "content": "pass"}],
+            "instruction": "Write a result.",
+            "max_tokens": 1024,
+        }
+
+        old_key = os.environ.get("ANTHROPIC_API_KEY")
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                manager = module.OllamaClusterManager(
+                    config, http_client=http_client, allowed_root=temp_dir
+                )
+                result = manager.execute_task(task_package, output_path="claude.txt")
+                output_path = Path(temp_dir) / "claude.txt"
+                output_text = output_path.read_text(encoding="utf-8")
+        finally:
+            if old_key is None:
+                os.environ.pop("ANTHROPIC_API_KEY", None)
+            else:
+                os.environ["ANTHROPIC_API_KEY"] = old_key
+
+        self.assertEqual(output_text, "claude generated\n")
+        self.assertEqual(result["provider"], "anthropic")
+        self.assertEqual(result["response_id"], "msg_test")
+        self.assertEqual(
+            http_client.post_calls[0][0], "https://api.anthropic.com/v1/messages"
+        )
+        self.assertEqual(http_client.post_calls[0][3]["x-api-key"], "test-key")
+        self.assertEqual(
+            http_client.post_calls[0][3]["anthropic-version"], "2023-06-01"
+        )
+        self.assertEqual(http_client.post_calls[0][1]["model"], "claude-sonnet-4-5")
+        self.assertEqual(http_client.post_calls[0][1]["system"], "Write concise code.")
 
 
 if __name__ == "__main__":

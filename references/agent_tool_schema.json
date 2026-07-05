@@ -32,6 +32,10 @@
           "items": {"type": "object", "additionalProperties": true}
         },
         "instruction": {"type": "string"},
+        "max_tokens": {
+          "type": "integer",
+          "description": "Optional Anthropic Messages API max_tokens override."
+        },
         "options": {"type": "object", "additionalProperties": true}
       }
     }

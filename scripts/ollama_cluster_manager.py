@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import importlib
 import json
 import os
 import sys
@@ -22,18 +23,25 @@ class RoutingError(Exception):
     pass
 
 
+class ProviderExecutionError(Exception):
+    pass
+
+
 class OllamaHttpClient:
     def get_json(self, url, timeout_seconds):
         request = urllib.request.Request(url, method="GET")
         return self._send(request, timeout_seconds)
 
-    def post_json(self, url, payload, timeout_seconds):
+    def post_json(self, url, payload, timeout_seconds, headers=None):
         body = json.dumps(payload).encode("utf-8")
+        request_headers = {"Content-Type": "application/json"}
+        if headers:
+            request_headers.update(headers)
         request = urllib.request.Request(
             url,
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers=request_headers,
         )
         return self._send(request, timeout_seconds)
 
@@ -67,6 +75,7 @@ class OllamaClusterManager:
             host_status = {
                 "label": host.get("label", host["url"]),
                 "url": host["url"],
+                "provider": host["provider"],
                 "priority": host["priority"],
                 "loaded_models": [],
                 "available_models": [],
@@ -75,6 +84,19 @@ class OllamaClusterManager:
                 "ok": True,
                 "errors": [],
             }
+            if host["provider"] != "ollama":
+                host_status["available_models"] = host.get("models", [])
+                host_status["available_model_details"] = [
+                    {"name": model} for model in host.get("models", [])
+                ]
+                credential_error = credential_status_error(host)
+                if credential_error:
+                    host_status["ok"] = False
+                    host_status["errors"].append(credential_error)
+                host_status["elapsed_ms"] = round((time.monotonic() - started) * 1000, 3)
+                hosts.append(host_status)
+                continue
+
             try:
                 ps_data = self.http_client.get_json(
                     endpoint_url(host["url"], "/api/ps"), host["timeout_seconds"]
@@ -107,27 +129,52 @@ class OllamaClusterManager:
         resolved_output = self.validate_output_path(output_path)
         status = self.status_check()
         host = self.choose_host(task_package["model"], status)
-        request_payload = build_generate_payload(task_package, self.config)
-        response = self.http_client.post_json(
-            endpoint_url(host["url"], "/api/generate"),
-            request_payload,
-            host.get("timeout_seconds", 30),
-        )
-        generated_text = response.get("response", "")
+        generated_text, response_metadata = self.generate_text(host, task_package)
         resolved_output.parent.mkdir(parents=True, exist_ok=True)
         resolved_output.write_text(generated_text, encoding="utf-8")
-        return {
+        result = {
             "status": "success",
+            "provider": host["provider"],
             "host": host["url"],
             "host_label": host.get("label", host["url"]),
             "model": task_package["model"],
             "output_path": str(resolved_output),
             "bytes_written": resolved_output.stat().st_size,
-            "prompt_eval_count": response.get("prompt_eval_count"),
-            "eval_count": response.get("eval_count"),
-            "total_duration": response.get("total_duration"),
-            "load_duration": response.get("load_duration"),
         }
+        result.update(response_metadata)
+        return result
+
+    def generate_text(self, host, task_package):
+        provider = host["provider"]
+        if provider == "ollama":
+            request_payload = build_ollama_payload(task_package, self.config)
+            response = self.http_client.post_json(
+                endpoint_url(host["url"], "/api/generate"),
+                request_payload,
+                host.get("timeout_seconds", 30),
+            )
+            return response.get("response", ""), ollama_metadata(response)
+        if provider == "openai":
+            request_payload = build_openai_payload(task_package)
+            response = self.http_client.post_json(
+                endpoint_url(host["url"], "/v1/responses"),
+                request_payload,
+                host.get("timeout_seconds", 30),
+                headers=openai_headers(host),
+            )
+            return extract_openai_text(response), openai_metadata(response)
+        if provider == "anthropic":
+            request_payload = build_anthropic_payload(task_package)
+            response = self.http_client.post_json(
+                endpoint_url(host["url"], "/v1/messages"),
+                request_payload,
+                host.get("timeout_seconds", 30),
+                headers=anthropic_headers(host),
+            )
+            return extract_anthropic_text(response), anthropic_metadata(response)
+        if provider == "codex":
+            return run_codex_sdk(host, task_package)
+        raise RoutingError(f"unsupported provider: {provider}")
 
     def validate_output_path(self, output_path):
         candidate = Path(output_path)
@@ -170,7 +217,14 @@ def load_config(config_path=None):
         for index, raw_url in enumerate(env_hosts.split(",")):
             url = raw_url.strip()
             if url:
-                hosts.append({"url": url, "priority": len(hosts), "label": f"env-{index + 1}"})
+                hosts.append(
+                    {
+                        "provider": "ollama",
+                        "url": url,
+                        "priority": len(hosts),
+                        "label": f"env-{index + 1}",
+                    }
+                )
         return {"hosts": hosts}
     raise ClusterConfigError("provide --config or OLLAMA_CLUSTER_HOSTS")
 
@@ -181,15 +235,22 @@ def normalize_config(config):
         raise ClusterConfigError("config must include at least one host")
     normalized_hosts = []
     for index, host in enumerate(hosts):
-        url = host.get("url")
+        provider = host.get("provider", "ollama")
+        if provider not in {"ollama", "openai", "anthropic", "codex"}:
+            raise ClusterConfigError(f"unsupported provider: {provider}")
+        url = host.get("url") or default_provider_url(provider)
         if not url:
             raise ClusterConfigError("each host must include url")
         normalized_hosts.append(
             {
+                "provider": provider,
                 "url": url.rstrip("/"),
                 "label": host.get("label", url),
                 "priority": int(host.get("priority", 0)),
                 "timeout_seconds": float(host.get("timeout_seconds", 30)),
+                "api_key_env": host.get("api_key_env") or default_api_key_env(provider),
+                "anthropic_version": host.get("anthropic_version", "2023-06-01"),
+                "models": host.get("models", []),
             }
         )
     normalized = dict(config)
@@ -217,7 +278,54 @@ def best_host(host_statuses):
     )[0]
 
 
-def build_generate_payload(task_package, config):
+def default_provider_url(provider):
+    return {
+        "openai": "https://api.openai.com",
+        "anthropic": "https://api.anthropic.com",
+        "codex": "local-codex-sdk",
+    }.get(provider)
+
+
+def default_api_key_env(provider):
+    return {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+    }.get(provider)
+
+
+def credential_status_error(host):
+    api_key_env = host.get("api_key_env")
+    if api_key_env and not os.environ.get(api_key_env):
+        return {
+            "endpoint": "credential",
+            "message": f"missing required environment variable: {api_key_env}",
+        }
+    if host["provider"] == "codex" and importlib.util.find_spec("openai_codex") is None:
+        return {
+            "endpoint": "codex-sdk",
+            "message": "missing optional Python package: openai-codex",
+        }
+    return None
+
+
+def read_api_key(host):
+    api_key_env = host.get("api_key_env")
+    if not api_key_env:
+        return None
+    api_key = os.environ.get(api_key_env)
+    if not api_key:
+        raise ClusterConfigError(f"missing required environment variable: {api_key_env}")
+    return api_key
+
+
+def build_prompt_body(task_package):
+    return {
+        "context": task_package.get("context", []),
+        "instruction": task_package.get("instruction", ""),
+    }
+
+
+def build_ollama_payload(task_package, config):
     prompt_body = {
         "context": task_package.get("context", []),
         "instruction": task_package.get("instruction", ""),
@@ -236,8 +344,127 @@ def build_generate_payload(task_package, config):
     return payload
 
 
+def build_openai_payload(task_package):
+    input_items = []
+    if task_package.get("system_prompt"):
+        input_items.append(
+            {"role": "developer", "content": task_package.get("system_prompt", "")}
+        )
+    input_items.append(
+        {
+            "role": "user",
+            "content": json.dumps(build_prompt_body(task_package), ensure_ascii=False),
+        }
+    )
+    payload = {"model": task_package["model"], "input": input_items}
+    if task_package.get("options"):
+        payload.update(task_package["options"])
+    return payload
+
+
+def build_anthropic_payload(task_package):
+    payload = {
+        "model": task_package["model"],
+        "max_tokens": int(task_package.get("max_tokens", 4096)),
+        "messages": [
+            {
+                "role": "user",
+                "content": json.dumps(build_prompt_body(task_package), ensure_ascii=False),
+            }
+        ],
+    }
+    if task_package.get("system_prompt"):
+        payload["system"] = task_package.get("system_prompt", "")
+    if task_package.get("options"):
+        payload.update(task_package["options"])
+    return payload
+
+
+def openai_headers(host):
+    return {"Authorization": f"Bearer {read_api_key(host)}"}
+
+
+def anthropic_headers(host):
+    return {
+        "x-api-key": read_api_key(host),
+        "anthropic-version": host.get("anthropic_version", "2023-06-01"),
+    }
+
+
+def extract_openai_text(response):
+    if response.get("output_text"):
+        return response["output_text"]
+    chunks = []
+    for item in response.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") in {"output_text", "text"} and content.get("text"):
+                chunks.append(content["text"])
+    return "".join(chunks)
+
+
+def extract_anthropic_text(response):
+    chunks = []
+    for item in response.get("content", []):
+        if item.get("type") == "text" and item.get("text"):
+            chunks.append(item["text"])
+    return "".join(chunks)
+
+
+def ollama_metadata(response):
+    return {
+        "prompt_eval_count": response.get("prompt_eval_count"),
+        "eval_count": response.get("eval_count"),
+        "total_duration": response.get("total_duration"),
+        "load_duration": response.get("load_duration"),
+    }
+
+
+def openai_metadata(response):
+    usage = response.get("usage", {})
+    return {
+        "response_id": response.get("id"),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+    }
+
+
+def anthropic_metadata(response):
+    usage = response.get("usage", {})
+    return {
+        "response_id": response.get("id"),
+        "stop_reason": response.get("stop_reason"),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+    }
+
+
+def run_codex_sdk(host, task_package):
+    try:
+        codex_module = importlib.import_module("openai_codex")
+    except ImportError as error:
+        raise ProviderExecutionError(
+            "install optional dependency first: pip install openai-codex"
+        ) from error
+
+    prompt = json.dumps(build_prompt_body(task_package), ensure_ascii=False, indent=2)
+    model = task_package["model"]
+    sandbox_name = host.get("sandbox", "workspace_write")
+    try:
+        sandbox = getattr(codex_module.Sandbox, sandbox_name)
+    except AttributeError:
+        sandbox = None
+
+    with codex_module.Codex() as codex:
+        if sandbox is None:
+            thread = codex.thread_start(model=model)
+        else:
+            thread = codex.thread_start(model=model, sandbox=sandbox)
+        result = thread.run(prompt)
+    return result.final_response, {"thread_id": getattr(result, "thread_id", None)}
+
+
 def build_parser():
-    parser = argparse.ArgumentParser(description="Route tasks across Ollama hosts.")
+    parser = argparse.ArgumentParser(description="Route tasks across local and API LLM providers.")
     parser.add_argument("action", choices=["status_check", "execute_task"])
     parser.add_argument("--config", help="Path to ollama cluster config JSON.")
     parser.add_argument("--allowed-root", help="Directory that output_path must stay inside.")

@@ -2,15 +2,44 @@
   "hosts": [
     {
       "label": "local-lan-primary",
+      "provider": "ollama",
       "url": "http://192.168.0.30:11434",
       "priority": 100,
       "timeout_seconds": 30
     },
     {
       "label": "local-lan-secondary",
+      "provider": "ollama",
       "url": "http://192.168.0.136:11434",
       "priority": 10,
       "timeout_seconds": 30
+    },
+    {
+      "label": "openai-api",
+      "provider": "openai",
+      "url": "https://api.openai.com",
+      "priority": 5,
+      "timeout_seconds": 60,
+      "api_key_env": "OPENAI_API_KEY",
+      "models": ["gpt-5.4"]
+    },
+    {
+      "label": "claude-api",
+      "provider": "anthropic",
+      "url": "https://api.anthropic.com",
+      "priority": 4,
+      "timeout_seconds": 60,
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "anthropic_version": "2023-06-01",
+      "models": ["claude-sonnet-4-5"]
+    },
+    {
+      "label": "local-codex-sdk",
+      "provider": "codex",
+      "url": "local-codex-sdk",
+      "priority": 3,
+      "timeout_seconds": 60,
+      "models": ["gpt-5.4"]
     }
   ],
   "defaults": {

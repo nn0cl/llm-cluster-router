@@ -1,12 +1,12 @@
 # LLM Cluster Router
 
-Reusable agent tooling for routing local model tasks across multiple Ollama
-hosts.
+Reusable agent tooling for routing model tasks across local Ollama hosts,
+OpenAI-compatible API calls, Anthropic Claude API calls, and the local Codex
+SDK.
 
 The current skill package name is `ollama-cluster-router` for compatibility
 with existing Codex and Claude Code skill installations. The repository name is
-broader so future local LLM routing providers can be added without coupling this
-tool to a single application repository.
+broader because the router can now target multiple LLM providers.
 
 ## Contents
 
@@ -45,4 +45,40 @@ scripts/setup_skill.sh --help
 ## Safety
 
 Always pass `--allowed-root` when running `execute_task`. The manager validates
-the requested output path before sending any request to Ollama.
+the requested output path before sending any model request.
+
+## Providers
+
+Configure providers in `references/ollama_cluster_config.sample.json` or your
+own config file.
+
+- `ollama`: local or LAN Ollama hosts. Uses `/api/ps`, `/api/tags`, and
+  `/api/generate`.
+- `openai`: OpenAI Responses API. Requires `OPENAI_API_KEY`.
+- `anthropic`: Claude Messages API. Requires `ANTHROPIC_API_KEY` and sends the
+  configured `anthropic_version`.
+- `codex`: local Codex Python SDK. Requires `pip install openai-codex` in the
+  environment that runs the router.
+
+Example:
+
+```sh
+OPENAI_API_KEY=... python3 scripts/ollama_cluster_manager.py \
+  execute_task \
+  --config references/ollama_cluster_config.sample.json \
+  --allowed-root "$PWD" \
+  --task-package /path/to/task.json \
+  --output-path generated/result.txt
+```
+
+Task package shape:
+
+```json
+{
+  "model": "gpt-5.4",
+  "system_prompt": "Write concise, reviewable code.",
+  "context": [{"path": "example.py", "content": "def existing(): pass"}],
+  "instruction": "Create the requested function.",
+  "options": {}
+}
+```

@@ -1,3 +1,3 @@
 display_name: Ollama Cluster Router
-short_description: Route local AI tasks across multiple Ollama machines.
-default_prompt: Use local Ollama cluster routing for this task. Check host status, choose the best machine for the requested model, and write output directly to the allowed project path.
+short_description: Route AI tasks across Ollama, OpenAI, Anthropic, and Codex providers.
+default_prompt: Use LLM cluster routing for this task. Check provider status, choose the best configured provider for the requested model, and write output directly to the allowed project path.
