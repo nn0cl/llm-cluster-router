@@ -199,3 +199,8 @@ Task package shape:
   "options": {}
 }
 ```
+
+## License
+
+MIT License, Copyright (c) 2026 dstechnology co., ltd. See
+[LICENSE](LICENSE).
