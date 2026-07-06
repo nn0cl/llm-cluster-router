@@ -7,9 +7,14 @@
 # docs/architecture/ and docs/specs/ are NOT excluded: they document the
 # router's own design, not AI operating process, and are useful to a
 # downstream consumer of the released code.
+#
+# .github/ is excluded in full (not just copilot-instructions.md): issue
+# templates, workflows, dependabot config, and FUNDING.yml are this repo's
+# own GitHub project management and do nothing useful once the router is
+# vendored as a skill inside another project.
 AGENTS.md export-ignore
 CLAUDE.md export-ignore
-.github/copilot-instructions.md export-ignore
+.github/ export-ignore
 docs/at-tdd/ export-ignore
 docs/collaboration/ export-ignore
 docs/templates/ export-ignore
