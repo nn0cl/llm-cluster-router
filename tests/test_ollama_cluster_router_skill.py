@@ -162,6 +162,66 @@ class LlmClusterRouterSkillTests(unittest.TestCase):
 
         self.assertEqual(http_client.post_calls[0][0], "http://warm:11434/api/generate")
 
+    def test_strip_code_fence_extracts_first_fenced_block(self):
+        module = load_manager_module()
+
+        self.assertEqual(
+            module.strip_code_fence("```python\ndef add(a, b):\n    return a + b\n```"),
+            "def add(a, b):\n    return a + b\n",
+        )
+
+    def test_strip_code_fence_extracts_first_block_ignoring_surrounding_prose(self):
+        module = load_manager_module()
+
+        text = "Here you go:\n```\nline one\nline two\n```\nHope that helps!"
+        self.assertEqual(module.strip_code_fence(text), "line one\nline two\n")
+
+    def test_strip_code_fence_returns_original_text_when_unfenced(self):
+        module = load_manager_module()
+
+        self.assertEqual(module.strip_code_fence("plain output\n"), "plain output\n")
+
+    def test_execute_task_strips_code_fence_from_generated_text_before_writing(self):
+        module = load_manager_module()
+        config = {
+            "hosts": [
+                {"url": "http://warm:11434", "priority": 99, "label": "warm"},
+            ]
+        }
+        http_client = FakeOllamaHttpClient(
+            {
+                "http://warm:11434/api/ps": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+                "http://warm:11434/api/tags": {
+                    "models": [{"name": "qwen2.5-coder:7b"}]
+                },
+            },
+            {
+                "http://warm:11434/api/generate": {
+                    "response": "```python\ndef add(a, b):\n    return a + b\n```"
+                }
+            },
+        )
+        task_package = {
+            "model": "qwen2.5-coder:7b",
+            "system_prompt": "Write concise code.",
+            "context": [],
+            "instruction": "Write a function.",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = module.OllamaClusterManager(
+                config, http_client=http_client, allowed_root=temp_dir
+            )
+            manager.execute_task(task_package, output_path="result.py")
+            output_path = Path(temp_dir) / "result.py"
+
+            self.assertEqual(
+                output_path.read_text(encoding="utf-8"),
+                "def add(a, b):\n    return a + b\n",
+            )
+
     def test_execute_task_rejects_path_traversal_before_any_network_call(self):
         module = load_manager_module()
         config = {"hosts": [{"url": "http://alpha:11434", "priority": 1}]}

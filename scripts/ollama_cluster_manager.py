@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -132,6 +133,7 @@ class OllamaClusterManager:
         status = self.status_check()
         host = self.choose_host(routed_task["model"], status, routed_task.get("provider"))
         generated_text, response_metadata = self.generate_text(host, routed_task)
+        generated_text = strip_code_fence(generated_text)
         resolved_output.parent.mkdir(parents=True, exist_ok=True)
         resolved_output.write_text(generated_text, encoding="utf-8")
         return build_execute_result(
@@ -382,6 +384,16 @@ def read_api_key(host):
     if not api_key:
         raise ClusterConfigError(f"missing required environment variable: {api_key_env}")
     return api_key
+
+
+CODE_FENCE_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+
+
+def strip_code_fence(text):
+    match = CODE_FENCE_PATTERN.search(text)
+    if not match:
+        return text
+    return match.group(1)
 
 
 def build_prompt_body(task_package):

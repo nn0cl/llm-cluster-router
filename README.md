@@ -126,6 +126,12 @@ applies:
 Always pass `--allowed-root` when running `execute_task`. The manager validates
 the requested output path before sending any model request.
 
+`execute_task` always strips a single wrapping Markdown code fence
+(` ```lang ... ``` `) from the generated text before writing it, since coding
+models (local Ollama models especially) often wrap output that way even when
+asked for raw code. Only the content of the first fenced block is kept; any
+other formatting is written as-is.
+
 ## Providers
 
 Configure providers in `references/ollama_cluster_config.sample.json` or your
