@@ -1,11 +1,88 @@
 # LLM Cluster Router
 
-Reusable agent tooling for routing model tasks across local Ollama hosts,
-OpenAI-compatible API calls, Anthropic Claude API calls, and the local Codex
-SDK.
+Route compact LLM task packages across local Ollama, OpenAI-compatible APIs,
+Anthropic Claude, and the local Codex SDK — then write output only inside an
+allowed project root.
 
-The skill package name is `llm-cluster-router`, matching the broader
-multi-provider scope of this repository.
+[日本語 README](README.ja.md)
+
+**In one line:** a thin routing layer for agents that picks the right model
+provider per task, keeps costs down, and enforces safe output paths.
+
+## Why use this
+
+- **Cost control:** route small tasks to free local models; escalate to paid APIs
+  only when the task needs deeper reasoning.
+- **Provider portability:** one task package shape and config file across
+  Ollama, OpenAI, Anthropic, and Codex SDK.
+- **Agent-ready delivery:** use as a CLI, agent skill, or optional MCP server
+  without duplicating routing logic.
+
+## 30-second demo
+
+Check configured providers:
+
+```sh
+python3 scripts/ollama_cluster_manager.py status_check \
+  --config references/ollama_cluster_config.sample.json
+```
+
+Run a task (set API keys only when your config uses paid providers):
+
+```sh
+python3 scripts/ollama_cluster_manager.py execute_task \
+  --config references/ollama_cluster_config.sample.json \
+  --allowed-root "$PWD" \
+  --task-package references/example-task-package.json \
+  --output-path generated/demo-output.txt
+```
+
+For development diagnostics, add `--debug`. Safe structured events are written
+to stderr; `--log-file path` also writes them to a file. Logs include token
+usage, provider-reported prompt-cache fields, retries, request IDs, and stack
+traces on errors, but never prompt/response bodies or credentials. Optional
+per-host `pricing` settings (`input_per_1m`, `cached_input_per_1m`, and
+`output_per_1m`) enable an estimate; without them cost remains unavailable.
+Log retention can be bounded with `--log-max-bytes` (default 10 MB) and
+`--log-backup-count` (default 5 generations).
+
+## What it does
+
+- Accepts a compact JSON **task package** (system prompt, context snippets,
+  instruction, optional routing profile).
+- Selects a provider and model from config, including **profile-based
+  routing** (`easy`, `standard`, `hard`, `agentic`).
+- Validates the output path against `--allowed-root` **before** any model call.
+- Strips a single wrapping Markdown code fence from generated text before
+  writing.
+- Returns metadata (provider, model, profile evidence, byte count) without
+  requiring the caller to paste full generated content.
+
+## What it does not do
+
+- Full agent orchestration, tool planning, or multi-step workflows.
+- Automatic model pricing, quota tracking, or SaaS-style governance.
+- Persistence, audit databases, or team admin UI.
+- Silent escalation to more expensive models without config evidence.
+
+Routing design details: `docs/architecture/README.md`. Profile catalog:
+`docs/architecture/model-routing-catalog.md`.
+
+## Quick start
+
+1. Clone this repository.
+2. Copy `references/ollama_cluster_config.sample.json` and adjust hosts/models.
+3. Set provider credentials in the environment (`OPENAI_API_KEY`,
+   `ANTHROPIC_API_KEY`, etc.) when needed.
+4. Run `status_check`, then `execute_task` with `--allowed-root`.
+
+Install as an agent skill:
+
+```sh
+python3 scripts/install_skill.py
+# or
+scripts/setup_skill.sh --help
+```
 
 ## Contents
 
@@ -16,13 +93,14 @@ multi-provider scope of this repository.
   (see `docs/architecture/adr/0007-mcp-delivery-adapter.md`). Calls the same
   `OllamaClusterManager` as the CLI; adds no routing logic of its own.
 - `scripts/setup_mcp_venv.sh` / `scripts/run_mcp_server.sh`: venv-based MCP
-  launch for hosts that already have Python (LISS-0005).
+  launch for hosts that already have Python.
 - `Dockerfile` / `docker-compose.yml`: Docker Compose MCP launch for hosts
-  without Python (LISS-0006).
+  without Python.
 - `scripts/install_skill.py`: copies the skill into a Codex skills directory.
 - `scripts/setup_skill.sh`: wires the skill into Codex, Claude Code, or a custom
   skills directory.
-- `references/`: sample config, tool schema, and system prompt text.
+- `references/`: sample config, tool schema, system prompt, and example task
+  package.
 - `tests/`: unit tests with fake Ollama clients and temporary directories.
 
 ## Test
@@ -34,22 +112,8 @@ python3 -m json.tool references/ollama_cluster_config.sample.json >/dev/null
 python3 -m json.tool references/agent_tool_schema.json >/dev/null
 ```
 
-`tests/test_mcp_server.py` skips itself when the optional `mcp` package (see
-below) is not installed.
-
-## Install
-
-Install for Codex:
-
-```sh
-python3 scripts/install_skill.py
-```
-
-Set up for Claude Code or a custom skill directory:
-
-```sh
-scripts/setup_skill.sh --help
-```
+`tests/test_mcp_server.py` skips itself when the optional `mcp` package is not
+installed.
 
 ## MCP Server (optional)
 
@@ -142,11 +206,14 @@ own config file.
 - `openai`: OpenAI Responses API. Requires `OPENAI_API_KEY`.
 - `anthropic`: Claude Messages API. Requires `ANTHROPIC_API_KEY` and sends the
   configured `anthropic_version`.
+- `sakana`: Sakana Fugu Responses API. Uses model `fugu` by default and
+  requires `SAKANA_API_KEY`. Input-token cache usage is provider-managed and
+  reported when Fugu returns it.
 - `codex`: local Codex Python SDK. Requires `pip install openai-codex` in the
   environment that runs the router.
 
-Claude and Codex are first-class configuration targets. Add them as
-`provider: "anthropic"` and `provider: "codex"` host entries with their
+Claude, Sakana, and Codex are first-class configuration targets. Add them as
+`provider: "anthropic"`, `provider: "sakana"`, and `provider: "codex"` host entries with their
 available `models`. The sample config also includes optional `task_profiles`
 and `routing_guidance` fields so the calling skill can classify a task before
 choosing the requested model.
@@ -162,6 +229,7 @@ section:
       "easy": {"provider": "ollama", "model": "qwen2.5-coder:7b"},
       "standard": {"provider": "openai", "model": "gpt-5.4"},
       "hard": {"provider": "anthropic", "model": "claude-sonnet-4-5"},
+      "fugu": {"provider": "sakana", "model": "fugu"},
       "agentic": {"provider": "codex", "model": "gpt-5.4"}
     }
   }
@@ -169,17 +237,24 @@ section:
 ```
 
 When a task package sets `routing_profile` (or `task_complexity` as a
-fallback) to a name defined under `routing.profiles`, the manager routes the
-task to that profile's configured provider and model. Without a matching
-profile, the manager falls back to routing by requested model, provider
-availability, and priority. `routing_guidance` stays descriptive-only: it
-helps the calling agent pick a profile name, but the manager does not read it.
+secondary routing hint) to a name defined under `routing.profiles`, the manager
+routes the task to that profile's configured provider and model. Without a
+matching profile, it routes by requested model, provider availability, and
+priority. A failed selected provider is never substituted with another provider
+or mock. `routing_guidance` stays descriptive-only: it helps the calling agent
+pick a profile name, but the manager does not read it.
 
 Pick a profile from the cheapest tier that can still do the task: `easy` (free
 local model) first, then `standard`, `hard`, or `agentic` only when the task
 needs that tier's reasoning depth. See
 `docs/architecture/model-routing-catalog.md` for the known models, their
 relative cost tier and reasoning depth, and which profile each one backs.
+
+`max_retries` accepts `0` through `3` and defaults to `3`. Retryable 408/425/429
+and 5xx responses, timeouts, and connection failures use bounded backoff. The
+selected provider is never replaced with another provider or mock. Structured
+output can be requested with a JSON Schema in `response_schema`; Ollama maps it
+to `format`, while Responses-compatible providers map it to `text.format`.
 
 Example:
 
@@ -188,7 +263,7 @@ OPENAI_API_KEY=... python3 scripts/ollama_cluster_manager.py \
   execute_task \
   --config references/ollama_cluster_config.sample.json \
   --allowed-root "$PWD" \
-  --task-package /path/to/task.json \
+  --task-package references/example-task-package.json \
   --output-path generated/result.txt
 ```
 
@@ -205,6 +280,21 @@ Task package shape:
   "options": {}
 }
 ```
+
+## Development process
+
+This repository applies the
+[llm-project-template](https://github.com/nn0cl/llm-project-template) collaboration
+strategy:
+
+- `AGENTS.md` – agent operating contract for all coding agents.
+- `docs/collaboration/README.md` – collaboration template overview (English).
+- `docs/collaboration/README.ja.md` – collaboration template overview
+  (Japanese).
+- `docs/collaboration/adoption-guide.md` – how the template is adopted here.
+
+Feature work follows AT-TDD: accepted specs under `docs/specs/`, local issues
+under `docs/issues/`, and work plans under `docs/work-plans/`.
 
 ## License
 

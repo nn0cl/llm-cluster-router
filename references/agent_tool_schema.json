@@ -10,7 +10,7 @@
     },
     "config_path": {
       "type": "string",
-      "description": "Path to an LLM cluster config JSON file with configured Ollama, OpenAI-compatible, Anthropic Claude, or Codex providers."
+      "description": "Path to an LLM cluster config JSON file with configured Ollama, OpenAI-compatible, Anthropic Claude, Sakana Fugu, or Codex providers."
     },
     "allowed_root": {
       "type": "string",
@@ -38,11 +38,38 @@
         },
         "task_complexity": {
           "type": "string",
-          "description": "Optional classification such as easy, hard, or agentic. When no routing_profile is given and this name matches a profile under config routing.profiles, the manager routes to that profile's configured provider and model. Falls back to routing by requested model and provider availability when unmatched or absent."
+          "description": "Optional classification such as easy, hard, or agentic. When no routing_profile is given and this name matches a profile under config routing.profiles, the manager routes to that profile's configured provider and model. If unmatched or absent, routing uses the requested model and configured provider availability."
         },
         "routing_profile": {
           "type": "string",
-          "description": "Optional routing hint such as easy, hard, or agentic. When this name matches a profile under config routing.profiles, the manager routes to that profile's configured provider and model, and it takes precedence over task_complexity. Falls back to routing by requested model and provider availability when unmatched or absent."
+          "description": "Optional routing hint such as easy, hard, or agentic. When this name matches a profile under config routing.profiles, the manager routes to that profile's configured provider and model, and it takes precedence over task_complexity. If unmatched or absent, routing uses the requested model and configured provider availability."
+        },
+        "prompt_cache": {
+          "type": "object",
+          "description": "Provider-managed input-token cache data. The caller may describe stable and dynamic input parts but cannot disable provider caching.",
+          "additionalProperties": false,
+          "properties": {
+            "policy": {"const": "provider_managed"},
+            "data": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "stable_prefix": {"type": "array"},
+                "dynamic_suffix": {"type": "array"}
+              }
+            }
+          }
+        },
+        "response_schema": {
+          "type": "object",
+          "description": "Optional JSON Schema for structured output. Ollama maps it to format; Responses-compatible providers map it to text.format.",
+          "additionalProperties": false,
+          "required": ["schema"],
+          "properties": {
+            "name": {"type": "string"},
+            "schema": {"type": "object", "additionalProperties": true},
+            "strict": {"type": "boolean", "default": true}
+          }
         },
         "options": {"type": "object", "additionalProperties": true}
       }

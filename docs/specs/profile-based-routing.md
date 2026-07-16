@@ -96,6 +96,8 @@ Scenario: Unknown routing profile fails before provider execution
 
 - Automatic model pricing discovery.
 - Automatic SaaS model capability ranking.
+- Configured fallback routing between profiles (see
+  `docs/specs/fallback-routing.md`).
 - Network calls to list OpenAI or Anthropic models.
 - New third-party dependencies.
 - Renaming existing Ollama-specific filenames or environment variables.

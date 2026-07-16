@@ -23,6 +23,15 @@ No hidden business logic in adapters.
 6. Execute only the requested phase.
 7. Report Red, Green, Refactor, or Fast Path status honestly.
 
+Collaboration template overview (process docs, not product docs):
+
+- English: `docs/collaboration/README.md`.
+- Japanese: `docs/collaboration/README.ja.md`.
+- Adoption in this repo: `docs/collaboration/adoption-guide.md`.
+- Upstream template: [nn0cl/llm-project-template](https://github.com/nn0cl/llm-project-template).
+
+Product documentation lives at the repository root (`README.md`, `README.ja.md`).
+
 Relevant architecture documents:
 
 - Quickstart: `docs/architecture/agent-quickstart.md`.

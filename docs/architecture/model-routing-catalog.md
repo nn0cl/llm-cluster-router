@@ -19,6 +19,7 @@ packages sent through `scripts/ollama_cluster_manager.py`.
 | `ollama` | `qwen2.5-coder:7b` | Free (local/LAN compute only) | Shallow to moderate | Runs on hosts already in the cluster; no per-call cost. |
 | `openai` | `gpt-5.4` | Paid, low-to-moderate | Moderate | OpenAI-compatible Responses API. |
 | `anthropic` | `claude-sonnet-4-5` | Paid, higher | Deep | Claude Messages API; best for ambiguous or long-context work. |
+| `sakana` | `fugu` | Paid, provider-managed | Moderate to deep | Sakana Fugu Responses API; provider-managed orchestration and input-token cache usage. |
 | `codex` | `gpt-5.4` | Paid, higher | Deep, with tool use | Local Codex SDK; adds multi-step workspace/tool-use ability over the plain `openai` call. |
 
 Add a row here whenever a new provider or model becomes a configuration
@@ -34,6 +35,7 @@ cheapest model in the table that fits the profile's task class:
 | `easy` (`default_profile`) | `ollama` / `qwen2.5-coder:7b` | Small, local, low-risk tasks. Always the first tier tried. |
 | `standard` | `openai` / `gpt-5.4` | Ordinary coding tasks a local model handles poorly, but that do not need deep reasoning. |
 | `hard` | `anthropic` / `claude-sonnet-4-5` | Ambiguous, architecture-sensitive, or long-context reasoning. |
+| `fugu` | `sakana` / `fugu` | Fugu tasks where provider-managed orchestration is desired. |
 | `agentic` | `codex` / `gpt-5.4` | Multi-step workspace coding that needs tool use, when the SDK is available. |
 
 Cost-minimization principle: escalate one tier at a time. Only request

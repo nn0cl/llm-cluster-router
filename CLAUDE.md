@@ -115,6 +115,9 @@ Then output the reviewer empathy summary:
 Before starting a coding task:
 
 1. Read `docs/architecture/agent-quickstart.md`.
+   For collaboration-process context, also read `docs/collaboration/README.md`
+   or `docs/collaboration/README.ja.md`. Product docs are `README.md` and
+   `README.ja.md` at the repository root.
 2. Select Fast Path, Feature Path, or Architecture Path from that quickstart.
 3. Read only the documents required by the selected path.
 4. Read the target EARS/Gherkin file for Feature Path work.
