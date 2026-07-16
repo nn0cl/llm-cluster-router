@@ -82,27 +82,9 @@ fi
 
 target="$(cd "$target" && pwd)"
 
-paths=(
-  "AGENTS.md"
-  "CLAUDE.md"
-  "README.md"
-  "README.ja.md"
-  ".github/copilot-instructions.md"
-  ".github/dependabot.yml"
-  ".github/pull_request_template.md"
-  ".github/ISSUE_TEMPLATE"
-  ".github/workflows/ci.yml"
-  "docs/architecture"
-  "docs/at-tdd"
-  "docs/collaboration"
-  "docs/evaluation"
-  "docs/issues"
-  "docs/specs"
-  "docs/templates"
-  "docs/work-plans"
-  "scripts/copy-ai-collaboration-files.sh"
-  "scripts/init-llm-context.sh"
-)
+# shellcheck source=lib/collaboration-template-paths.sh
+source "$script_dir/lib/collaboration-template-paths.sh"
+paths=("${collaboration_template_paths[@]}")
 
 copied_files=()
 
@@ -125,9 +107,14 @@ copy_path() {
     mkdir -p "$dest"
     while IFS= read -r src_file; do
       local subpath="${src_file#$src/}"
+      local rel_file="$rel/$subpath"
       local dest_file="$dest/$subpath"
+      if is_collaboration_template_excluded "$rel_file"; then
+        echo "skip template-history $rel_file"
+        continue
+      fi
       if [ -e "$dest_file" ] && [ "$force" != true ]; then
-        echo "skip existing $rel/$subpath"
+        echo "skip existing $rel_file"
         continue
       fi
       mkdir -p "$(dirname "$dest_file")"
@@ -166,10 +153,11 @@ replace_placeholders() {
   local file
   for file in "${copied_files[@]}"; do
     case "$file" in
-      *.md|*.yml|*.yaml)
+      *.md|*.mdc|*.yml|*.yaml)
         local full="$target/$file"
         [ -f "$full" ] || continue
         if [ -n "$project_replacement" ]; then
+          perl -0pi -e "s/<PROJECT_NAME: one-line description of the product and its\\ndomain>/$(escape_perl_replacement "$project_replacement")/g" "$full"
           perl -0pi -e "s/<PROJECT_NAME: one-line description of the product and its domain>/$(escape_perl_replacement "$project_replacement")/g" "$full"
         fi
         if [ -n "$project_name" ]; then
@@ -184,19 +172,41 @@ replace_placeholders() {
   done
 }
 
+write_version_marker() {
+  [ "$dry_run" = true ] && return
+
+  local source_ref
+  source_ref="$(git -C "$repo_root" rev-parse HEAD 2>/dev/null || echo "unknown")"
+  local source_origin
+  source_origin="$(git -C "$repo_root" remote get-url origin 2>/dev/null || echo "$repo_root")"
+
+  cat > "$target/.collaboration-template-version" <<MARKER
+# Records which commit of the AI-human collaboration template this project
+# last synced against. Read by scripts/update-ai-collaboration-files.sh.
+# Do not edit by hand except to correct the source.
+source: $source_origin
+ref: $source_ref
+MARKER
+}
+
 for rel in "${paths[@]}"; do
   copy_path "$rel"
 done
 
 replace_placeholders
+write_version_marker
 
 cat <<SUMMARY
 
 Done.
 Target: $target
 Existing files were $([ "$force" = true ] && echo "overwritten when matched" || echo "left unchanged")
+Recorded sync point in .collaboration-template-version for future updates.
 
 Next:
   cd "$target"
   scripts/init-llm-context.sh .
+
+Later, to pull in template updates:
+  scripts/update-ai-collaboration-files.sh --target "$target"
 SUMMARY

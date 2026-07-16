@@ -1,0 +1,13 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "system_prompt": "Write concise, reviewable code.",
+  "context": [
+    {
+      "path": "example.py",
+      "content": "def existing():\n    pass\n"
+    }
+  ],
+  "instruction": "Add a function named greet(name) that returns a short greeting string.",
+  "routing_profile": "easy",
+  "options": {}
+}

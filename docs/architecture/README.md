@@ -65,6 +65,7 @@ Current adapter candidates:
 - Ollama HTTP adapter for `/api/ps`, `/api/tags`, and `/api/generate`.
 - OpenAI-compatible Responses API adapter.
 - Anthropic Messages API adapter.
+- Sakana Fugu Responses API adapter.
 - Local Codex SDK adapter.
 - Filesystem output adapter.
 - Skill installation adapters for Codex, Claude Code, and custom skill
@@ -91,6 +92,8 @@ It must not own:
 - OpenAI-compatible and Anthropic-compatible HTTP APIs are optional and
   replaceable external providers.
 - The local Codex SDK adapter is optional and replaceable.
+- Provider wire-format and HTTP transport code currently lives under
+  `scripts/adapters/`; orchestration extraction is tracked by LISS-0022.
 - Provider credentials are secret inputs and must not be committed, logged, or
   copied into AI payloads.
 - Generated model output is untrusted text until reviewed by the caller.

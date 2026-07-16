@@ -35,6 +35,16 @@
       "task_profiles": ["hard", "agentic", "long-context"]
     },
     {
+      "label": "sakana-fugu-api",
+      "provider": "sakana",
+      "url": "https://api.sakana.ai",
+      "priority": 2,
+      "timeout_seconds": 120,
+      "max_retries": 3,
+      "api_key_env": "SAKANA_API_KEY",
+      "models": ["fugu"]
+    },
+    {
       "label": "local-codex-sdk",
       "provider": "codex",
       "url": "local-codex-sdk",
@@ -62,6 +72,10 @@
       "hard": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-5"
+      },
+      "fugu": {
+        "provider": "sakana",
+        "model": "fugu"
       },
       "agentic": {
         "provider": "codex",

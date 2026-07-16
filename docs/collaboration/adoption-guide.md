@@ -7,6 +7,11 @@ midway adoption does not overwrite product documentation.
 For the benefits and tradeoffs of using the template, see
 `docs/collaboration/template-benefits.md`.
 
+For a readable overview of the collaboration template itself, see
+`docs/collaboration/README.md` (English) and
+`docs/collaboration/README.ja.md` (Japanese). Product documentation for
+llm-cluster-router stays in the repository root README files.
+
 ## New Repository Adoption
 
 1. Run `scripts/copy-ai-collaboration-files.sh --target <repo>`.

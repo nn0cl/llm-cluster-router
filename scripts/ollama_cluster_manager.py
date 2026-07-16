@@ -4,71 +4,104 @@ import importlib
 import importlib.util
 import json
 import os
-import re
+import socket
 import sys
+import threading
 import time
+import uuid
 import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import urljoin
 
+try:
+    from router.models import (
+        ClusterConfigError,
+        PathValidationError,
+        ProviderExecutionError,
+        ProviderRequestError,
+        RoutingError,
+    )
+    from router.safety import strip_code_fence, validate_output_path
+    from router.routing import (
+        best_host,
+        choose_configured_profile_host,
+        host_supports_model,
+        model_name_matches,
+        resolve_routing_profile,
+    )
+    from router.observability import configure_logging, estimate_cost, safe_json_event
+    from adapters import providers
+    from adapters import http as provider_http
+except ModuleNotFoundError:
+    from scripts.router.models import (
+        ClusterConfigError,
+        PathValidationError,
+        ProviderExecutionError,
+        ProviderRequestError,
+        RoutingError,
+    )
+    from scripts.router.safety import strip_code_fence, validate_output_path
+    from scripts.router.routing import (
+        best_host,
+        choose_configured_profile_host,
+        host_supports_model,
+        model_name_matches,
+        resolve_routing_profile,
+    )
+    from scripts.router.observability import configure_logging, estimate_cost, safe_json_event
+    from scripts.adapters import providers
+    from scripts.adapters import http as provider_http
 
-class ClusterConfigError(Exception):
-    pass
-
-
-class PathValidationError(Exception):
-    pass
-
-
-class RoutingError(Exception):
-    pass
-
-
-class ProviderExecutionError(Exception):
-    pass
-
-
-class OllamaHttpClient:
-    def get_json(self, url, timeout_seconds):
-        request = urllib.request.Request(url, method="GET")
-        return self._send(request, timeout_seconds)
-
-    def post_json(self, url, payload, timeout_seconds, headers=None):
-        body = json.dumps(payload).encode("utf-8")
-        request_headers = {"Content-Type": "application/json"}
-        if headers:
-            request_headers.update(headers)
-        request = urllib.request.Request(
-            url,
-            data=body,
-            method="POST",
-            headers=request_headers,
-        )
-        return self._send(request, timeout_seconds)
-
-    def _send(self, request, timeout_seconds):
-        try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"HTTP {error.code}: {detail}") from error
-        except urllib.error.URLError as error:
-            raise RuntimeError(str(error.reason)) from error
+OllamaHttpClient = provider_http.OllamaHttpClient
 
 
 class OllamaClusterManager:
-    def __init__(self, config, http_client=None, allowed_root=None):
+    def __init__(
+        self,
+        config,
+        http_client=None,
+        allowed_root=None,
+        sleep_fn=None,
+        cancel_event=None,
+        event_sink=None,
+        debug=False,
+        logger=None,
+    ):
         self.config = normalize_config(config)
         self.http_client = http_client or OllamaHttpClient()
         self.allowed_root = Path(allowed_root or os.getcwd()).resolve()
+        self.sleep_fn = sleep_fn or time.sleep
+        self.cancel_event = cancel_event or threading.Event()
+        self.event_sink = event_sink or (lambda _event: None)
+        self.logger = logger or configure_logging(debug=debug)
+        self.correlation_id = None
 
     @classmethod
-    def from_sources(cls, config_path=None, http_client=None, allowed_root=None):
+    def from_sources(
+        cls,
+        config_path=None,
+        http_client=None,
+        allowed_root=None,
+        debug=False,
+        log_file=None,
+        log_max_bytes=10_000_000,
+        log_backup_count=5,
+    ):
         config = load_config(config_path)
         default_root = config.get("defaults", {}).get("allowed_root")
-        return cls(config, http_client=http_client, allowed_root=allowed_root or default_root)
+        return cls(
+            config,
+            http_client=http_client,
+            allowed_root=allowed_root or default_root,
+            debug=debug,
+            logger=configure_logging(
+                debug=debug,
+                log_file=log_file,
+                max_bytes=log_max_bytes,
+                backup_count=log_backup_count,
+            ),
+        )
 
     def status_check(self):
         hosts = []
@@ -107,8 +140,14 @@ class OllamaClusterManager:
                 host_status["loaded_model_details"] = loaded_details
                 host_status["loaded_models"] = model_names(loaded_details)
             except Exception as error:
-                host_status["ok"] = False
-                host_status["errors"].append({"endpoint": "/api/ps", "message": str(error)})
+                host_status["errors"].append(
+                    {
+                        "endpoint": "/api/ps",
+                        "message": str(error),
+                        "kind": "telemetry_unavailable",
+                        **provider_error_metadata(error),
+                    }
+                )
 
             try:
                 tags_data = self.http_client.get_json(
@@ -120,7 +159,12 @@ class OllamaClusterManager:
             except Exception as error:
                 host_status["ok"] = False
                 host_status["errors"].append(
-                    {"endpoint": "/api/tags", "message": str(error)}
+                    {
+                        "endpoint": "/api/tags",
+                        "message": str(error),
+                        "kind": "availability_check_failed",
+                        **provider_error_metadata(error),
+                    }
                 )
 
             host_status["elapsed_ms"] = round((time.monotonic() - started) * 1000, 3)
@@ -128,6 +172,8 @@ class OllamaClusterManager:
         return {"status": "ok", "hosts": hosts}
 
     def execute_task(self, task_package, output_path):
+        self.correlation_id = uuid.uuid4().hex
+        self._emit_event("waiting", task_package)
         resolved_output = self.validate_output_path(output_path)
         routed_task, routing_metadata = resolve_routing_profile(task_package, self.config)
         status = self.status_check()
@@ -136,6 +182,7 @@ class OllamaClusterManager:
         generated_text = strip_code_fence(generated_text)
         resolved_output.parent.mkdir(parents=True, exist_ok=True)
         resolved_output.write_text(generated_text, encoding="utf-8")
+        self._emit_event("completed", routed_task, host=host)
         return build_execute_result(
             host,
             routed_task,
@@ -145,49 +192,153 @@ class OllamaClusterManager:
         )
 
     def generate_text(self, host, task_package):
-        provider = host["provider"]
-        if provider == "ollama":
-            request_payload = build_ollama_payload(task_package, self.config)
-            response = self.http_client.post_json(
-                endpoint_url(host["url"], "/api/generate"),
-                request_payload,
-                host.get("timeout_seconds", 30),
-            )
-            return response.get("response", ""), ollama_metadata(response)
-        if provider == "openai":
-            request_payload = build_openai_payload(task_package)
-            response = self.http_client.post_json(
-                endpoint_url(host["url"], "/v1/responses"),
-                request_payload,
-                host.get("timeout_seconds", 30),
-                headers=openai_headers(host),
-            )
-            return extract_openai_text(response), openai_metadata(response)
-        if provider == "anthropic":
-            request_payload = build_anthropic_payload(task_package)
-            response = self.http_client.post_json(
-                endpoint_url(host["url"], "/v1/messages"),
-                request_payload,
-                host.get("timeout_seconds", 30),
-                headers=anthropic_headers(host),
-            )
-            return extract_anthropic_text(response), anthropic_metadata(response)
-        if provider == "codex":
-            return run_codex_sdk(host, task_package)
-        raise RoutingError(f"unsupported provider: {provider}")
+        if self.correlation_id is None:
+            self.correlation_id = uuid.uuid4().hex
+        retry_count = host.get("max_retries", 3)
+        attempt = 0
+        started = time.monotonic()
+        while True:
+            if self.cancel_event.is_set():
+                self._emit_event("cancelled", task_package, host=host, attempt=attempt + 1)
+                raise ProviderExecutionError("ollama request cancelled")
+            try:
+                text, metadata = self._generate_text_once(host, task_package)
+                metadata = dict(metadata)
+                metadata["attempts"] = attempt + 1
+                metadata["retries"] = attempt
+                metadata["duration_ms"] = round((time.monotonic() - started) * 1000, 3)
+                metadata["cost_estimate"] = estimate_cost(metadata, host)
+                self._log_event("completed", metadata, host=host, task_package=task_package)
+                return text, metadata
+            except Exception as error:
+                self._log_exception(error, host, task_package, attempt + 1)
+                if isinstance(error, (ConnectionError, TimeoutError)):
+                    error = ProviderRequestError(
+                        "provider connection failed",
+                        category="connection",
+                        retryable=True,
+                        operation="generate",
+                        model=task_package.get("model"),
+                    )
+                current_attempt = attempt + 1
+                if isinstance(error, ProviderRequestError):
+                    error.attempt = current_attempt
+                    error.max_attempts = retry_count + 1
+                    error.operation = error.operation or "generate"
+                    error.model = error.model or task_package.get("model")
+                if not is_retryable_provider_error(error) or attempt >= retry_count:
+                    if self.cancel_event.is_set():
+                        self._emit_event("cancelled", task_package, host=host, attempt=current_attempt)
+                    elif attempt >= retry_count:
+                        self._emit_event("exhausted", task_package, host=host, attempt=current_attempt)
+                    if isinstance(error, ProviderRequestError) and attempt >= retry_count:
+                        raise ProviderRequestError(
+                            f"{host['provider']} request failed after {attempt} retries "
+                            f"({error.category})",
+                            category=error.category,
+                            retryable=False,
+                            status_code=error.status_code,
+                            request_id=error.request_id,
+                            detail=error.detail,
+                            operation=error.operation,
+                            model=error.model,
+                            attempt=current_attempt,
+                            max_attempts=retry_count + 1,
+                        ) from error
+                    if isinstance(error, ProviderExecutionError):
+                        raise
+                    raise ProviderExecutionError(
+                        f"{host['provider']} request failed after {attempt} retries: {error}"
+                    ) from error
+                delay = error.retry_after if isinstance(error, ProviderRequestError) else None
+                if delay is None:
+                    delay = min(
+                        host.get("retry_delay_seconds", 1.0) * (2**attempt),
+                        host.get("retry_backoff_max_seconds", 30.0),
+                    )
+                else:
+                    delay = min(delay, host.get("retry_backoff_max_seconds", 30.0))
+                self.sleep_fn(delay)
+                self._emit_event(
+                    "retrying",
+                    task_package,
+                    host=host,
+                    attempt=current_attempt,
+                    retry_after=delay,
+                )
+                attempt += 1
+
+    def _emit_event(self, state, task_package, host=None, attempt=None, retry_after=None):
+        event = {
+            "state": state,
+            "provider": host.get("provider") if host else None,
+            "model": task_package.get("model") if isinstance(task_package, dict) else None,
+            "correlation_id": self.correlation_id,
+            "trace_id": self.correlation_id,
+            "span_id": uuid.uuid4().hex[:16],
+        }
+        if attempt is not None:
+            event["attempt"] = attempt
+        if retry_after is not None:
+            event["retry_after_seconds"] = retry_after
+        self.event_sink(event)
+        self._log_event(
+            state,
+            host=host,
+            task_package=task_package,
+            attempt=attempt,
+            retry_after_seconds=retry_after,
+        )
+
+    def _log_event(self, event_name, metadata=None, host=None, task_package=None, **fields):
+        event = {"event": event_name, **fields}
+        event["correlation_id"] = self.correlation_id
+        event["trace_id"] = self.correlation_id
+        event["span_id"] = uuid.uuid4().hex[:16]
+        if host:
+            event.update({"provider": host.get("provider"), "host": host.get("url"), "model": host.get("model")})
+        if task_package:
+            event["model"] = task_package.get("model")
+        if metadata:
+            event.update(metadata)
+        self.logger.debug(safe_json_event(event))
+
+    def _log_exception(self, error, host, task_package, attempt):
+        event = {
+            "event": "error",
+            "provider": host.get("provider"),
+            "host": host.get("url"),
+            "model": task_package.get("model"),
+            "attempt": attempt,
+            "error_type": type(error).__name__,
+            "message": "provider request failed",
+            "correlation_id": self.correlation_id,
+            "trace_id": self.correlation_id,
+            "span_id": uuid.uuid4().hex[:16],
+        }
+        if isinstance(error, ProviderRequestError):
+            event.update(provider_error_metadata(error))
+            event.update({"operation": error.operation, "max_attempts": error.max_attempts})
+        self.logger.exception(safe_json_event(event))
+
+    def cancel(self):
+        self.cancel_event.set()
+
+    def clear_cancel(self):
+        self.cancel_event.clear()
+
+    def _generate_text_once(self, host, task_package):
+        return providers.generate_provider_text(
+            host["provider"],
+            host,
+            task_package,
+            self.http_client,
+            self.config,
+            codex_runner=run_codex_sdk,
+        )
 
     def validate_output_path(self, output_path):
-        candidate = Path(output_path)
-        if not candidate.is_absolute():
-            candidate = self.allowed_root / candidate
-        resolved = candidate.resolve()
-        try:
-            resolved.relative_to(self.allowed_root)
-        except ValueError as error:
-            raise PathValidationError(
-                f"output_path must resolve inside allowed root: {self.allowed_root}"
-            ) from error
-        return resolved
+        return validate_output_path(output_path, self.allowed_root)
 
     def choose_host(self, requested_model, status, requested_provider=None):
         configured = {host["url"]: host for host in self.config["hosts"]}
@@ -199,13 +350,23 @@ class OllamaClusterManager:
             if profile_host:
                 return profile_host
         loaded = [
-            host for host in reachable if requested_model in host.get("loaded_models", [])
+            host
+            for host in reachable
+            if any(
+                model_name_matches(requested_model, candidate)
+                for candidate in host.get("loaded_models", [])
+            )
         ]
         if loaded:
             return configured[best_host(loaded)["url"]]
 
         available = [
-            host for host in reachable if requested_model in host.get("available_models", [])
+            host
+            for host in reachable
+            if any(
+                model_name_matches(requested_model, candidate)
+                for candidate in host.get("available_models", [])
+            )
         ]
         if available:
             return configured[best_host(available)["url"]]
@@ -242,7 +403,7 @@ def normalize_config(config):
     normalized_hosts = []
     for index, host in enumerate(hosts):
         provider = host.get("provider", "ollama")
-        if provider not in {"ollama", "openai", "anthropic", "codex"}:
+        if provider not in {"ollama", "openai", "anthropic", "sakana", "codex"}:
             raise ClusterConfigError(f"unsupported provider: {provider}")
         url = host.get("url") or default_provider_url(provider)
         if not url:
@@ -254,6 +415,11 @@ def normalize_config(config):
                 "label": host.get("label", url),
                 "priority": int(host.get("priority", 0)),
                 "timeout_seconds": float(host.get("timeout_seconds", 30)),
+                "max_retries": normalize_retry_count(host.get("max_retries", 3)),
+                "retry_delay_seconds": float(host.get("retry_delay_seconds", 1.0)),
+                "retry_backoff_max_seconds": float(
+                    host.get("retry_backoff_max_seconds", 30.0)
+                ),
                 "api_key_env": host.get("api_key_env") or default_api_key_env(provider),
                 "anthropic_version": host.get("anthropic_version", "2023-06-01"),
                 "models": host.get("models", []),
@@ -262,6 +428,56 @@ def normalize_config(config):
     normalized = dict(config)
     normalized["hosts"] = normalized_hosts
     return normalized
+
+
+def normalize_retry_count(value):
+    try:
+        retry_count = int(value)
+    except (TypeError, ValueError) as error:
+        raise ClusterConfigError("max_retries must be an integer from 0 through 3") from error
+    if retry_count < 0 or retry_count > 3:
+        raise ClusterConfigError("max_retries must be an integer from 0 through 3")
+    return retry_count
+
+
+def classify_http_status(status_code):
+    if status_code in {401, 403}:
+        return "authentication", False
+    if status_code == 429:
+        return "rate_limit", True
+    if status_code in {408, 425}:
+        return "transient_client", True
+    if 400 <= status_code < 500:
+        return "invalid_request", False
+    if status_code >= 500:
+        return "server", True
+    return "http", False
+
+
+def parse_retry_after(value):
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def is_retryable_provider_error(error):
+    if isinstance(error, ProviderRequestError):
+        return error.retryable
+    return isinstance(error, (ConnectionError, TimeoutError, urllib.error.URLError))
+
+
+def provider_error_metadata(error):
+    if isinstance(error, ProviderRequestError):
+        return {
+            "category": error.category,
+            "status_code": error.status_code,
+            "retryable": error.retryable,
+            "request_id": error.request_id,
+        }
+    return {"category": "connection", "status_code": None, "retryable": True}
 
 
 def build_execute_result(
@@ -285,47 +501,6 @@ def build_execute_result(
     return result
 
 
-def choose_configured_profile_host(hosts, requested_provider, requested_model):
-    configured_hosts = [
-        host
-        for host in hosts
-        if host["provider"] == requested_provider and host_supports_model(host, requested_model)
-    ]
-    if configured_hosts:
-        return best_host(configured_hosts)
-    return None
-
-
-def host_supports_model(host, requested_model):
-    return requested_model in host.get("models", [])
-
-
-def resolve_routing_profile(task_package, config):
-    if task_package.get("routing_profile"):
-        profile_name = task_package["routing_profile"]
-        metadata = {"routing_profile": profile_name}
-    elif task_package.get("task_complexity"):
-        profile_name = task_package["task_complexity"]
-        metadata = {"task_complexity": profile_name}
-    else:
-        return dict(task_package), {}
-
-    profiles = config.get("routing", {}).get("profiles", {})
-    profile = profiles.get(profile_name)
-    if not profile:
-        raise RoutingError(f"routing profile is not configured: {profile_name}")
-
-    provider = profile.get("provider")
-    model = profile.get("model")
-    if not provider or not model:
-        raise RoutingError(f"routing profile must include provider and model: {profile_name}")
-
-    routed_task = dict(task_package)
-    routed_task["provider"] = provider
-    routed_task["model"] = model
-    return routed_task, metadata
-
-
 def endpoint_url(base_url, path):
     return urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
 
@@ -339,17 +514,11 @@ def model_names(model_details):
     return names
 
 
-def best_host(host_statuses):
-    return sorted(
-        host_statuses,
-        key=lambda host: (-int(host.get("priority", 0)), float(host.get("elapsed_ms", 0))),
-    )[0]
-
-
 def default_provider_url(provider):
     return {
         "openai": "https://api.openai.com",
         "anthropic": "https://api.anthropic.com",
+        "sakana": "https://api.sakana.ai",
         "codex": "local-codex-sdk",
     }.get(provider)
 
@@ -358,6 +527,7 @@ def default_api_key_env(provider):
     return {
         "openai": "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
+        "sakana": "SAKANA_API_KEY",
     }.get(provider)
 
 
@@ -386,159 +556,84 @@ def read_api_key(host):
     return api_key
 
 
-CODE_FENCE_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
-
-
-def strip_code_fence(text):
-    match = CODE_FENCE_PATTERN.search(text)
-    if not match:
-        return text
-    return match.group(1)
-
-
 def build_prompt_body(task_package):
-    return {
-        "context": task_package.get("context", []),
-        "instruction": task_package.get("instruction", ""),
-    }
+    return providers.build_prompt_body(task_package)
 
 
 def build_ollama_payload(task_package, config):
-    prompt_body = {
-        "context": task_package.get("context", []),
-        "instruction": task_package.get("instruction", ""),
-    }
-    payload = {
-        "model": task_package["model"],
-        "system": task_package.get("system_prompt", ""),
-        "prompt": json.dumps(prompt_body, ensure_ascii=False, indent=2),
-        "stream": False,
-    }
-    if task_package.get("options"):
-        payload["options"] = task_package["options"]
-    keep_alive = task_package.get("keep_alive") or config.get("defaults", {}).get("keep_alive")
-    if keep_alive:
-        payload["keep_alive"] = keep_alive
-    return payload
+    return providers.build_ollama_payload(task_package, config)
 
 
 def build_openai_payload(task_package):
-    input_items = []
-    if task_package.get("system_prompt"):
-        input_items.append(
-            {"role": "developer", "content": task_package.get("system_prompt", "")}
-        )
-    input_items.append(
-        {
-            "role": "user",
-            "content": json.dumps(build_prompt_body(task_package), ensure_ascii=False),
-        }
-    )
-    payload = {"model": task_package["model"], "input": input_items}
-    if task_package.get("options"):
-        payload.update(task_package["options"])
-    return payload
+    return providers.build_openai_payload(task_package)
+
+
+def build_sakana_payload(task_package):
+    return providers.build_sakana_payload(task_package)
+
+
+def normalize_response_schema(value):
+    return providers.normalize_response_schema(value)
+
+
+def response_schema_for_ollama(value):
+    return providers.response_schema_for_ollama(value)
+
+
+def response_schema_for_responses(value):
+    return providers.response_schema_for_responses(value)
 
 
 def build_anthropic_payload(task_package):
-    payload = {
-        "model": task_package["model"],
-        "max_tokens": int(task_package.get("max_tokens", 4096)),
-        "messages": [
-            {
-                "role": "user",
-                "content": json.dumps(build_prompt_body(task_package), ensure_ascii=False),
-            }
-        ],
-    }
-    if task_package.get("system_prompt"):
-        payload["system"] = task_package.get("system_prompt", "")
-    if task_package.get("options"):
-        payload.update(task_package["options"])
-    return payload
+    return providers.build_anthropic_payload(task_package)
 
 
 def openai_headers(host):
-    return {"Authorization": f"Bearer {read_api_key(host)}"}
+    return providers.openai_headers(host)
 
 
 def anthropic_headers(host):
-    return {
-        "x-api-key": read_api_key(host),
-        "anthropic-version": host.get("anthropic_version", "2023-06-01"),
-    }
+    return providers.anthropic_headers(host)
+
+
+def sakana_headers(host):
+    return providers.sakana_headers(host)
+
+
+def provider_request_id(headers):
+    return headers.get("x-request-id") or headers.get("request-id")
 
 
 def extract_openai_text(response):
-    if response.get("output_text"):
-        return response["output_text"]
-    chunks = []
-    for item in response.get("output", []):
-        for content in item.get("content", []):
-            if content.get("type") in {"output_text", "text"} and content.get("text"):
-                chunks.append(content["text"])
-    return "".join(chunks)
+    return providers.extract_openai_text(response)
 
 
 def extract_anthropic_text(response):
-    chunks = []
-    for item in response.get("content", []):
-        if item.get("type") == "text" and item.get("text"):
-            chunks.append(item["text"])
-    return "".join(chunks)
+    return providers.extract_anthropic_text(response)
 
 
 def ollama_metadata(response):
-    return {
-        "prompt_eval_count": response.get("prompt_eval_count"),
-        "eval_count": response.get("eval_count"),
-        "total_duration": response.get("total_duration"),
-        "load_duration": response.get("load_duration"),
-    }
+    return providers.ollama_metadata(response)
 
 
 def openai_metadata(response):
-    usage = response.get("usage", {})
-    return {
-        "response_id": response.get("id"),
-        "input_tokens": usage.get("input_tokens"),
-        "output_tokens": usage.get("output_tokens"),
-    }
+    return providers.openai_metadata(response)
 
 
 def anthropic_metadata(response):
-    usage = response.get("usage", {})
-    return {
-        "response_id": response.get("id"),
-        "stop_reason": response.get("stop_reason"),
-        "input_tokens": usage.get("input_tokens"),
-        "output_tokens": usage.get("output_tokens"),
-    }
+    return providers.anthropic_metadata(response)
+
+
+def unavailable_prompt_cache_metadata():
+    return providers.unavailable_prompt_cache_metadata()
+
+
+def sakana_metadata(response):
+    return providers.sakana_metadata(response)
 
 
 def run_codex_sdk(host, task_package):
-    try:
-        codex_module = importlib.import_module("openai_codex")
-    except ImportError as error:
-        raise ProviderExecutionError(
-            "install optional dependency first: pip install openai-codex"
-        ) from error
-
-    prompt = json.dumps(build_prompt_body(task_package), ensure_ascii=False, indent=2)
-    model = task_package["model"]
-    sandbox_name = host.get("sandbox", "workspace_write")
-    try:
-        sandbox = getattr(codex_module.Sandbox, sandbox_name)
-    except AttributeError:
-        sandbox = None
-
-    with codex_module.Codex() as codex:
-        if sandbox is None:
-            thread = codex.thread_start(model=model)
-        else:
-            thread = codex.thread_start(model=model, sandbox=sandbox)
-        result = thread.run(prompt)
-    return result.final_response, {"thread_id": getattr(result, "thread_id", None)}
+    return providers.run_codex_sdk(host, task_package)
 
 
 def build_parser():
@@ -548,6 +643,10 @@ def build_parser():
     parser.add_argument("--allowed-root", help="Directory that output_path must stay inside.")
     parser.add_argument("--task-package", help="Path to task package JSON for execute_task.")
     parser.add_argument("--output-path", help="Output path for execute_task.")
+    parser.add_argument("--debug", action="store_true", help="Emit safe provider debug logs.")
+    parser.add_argument("--log-file", help="Write debug logs to this file as well as stderr.")
+    parser.add_argument("--log-max-bytes", type=int, default=10_000_000)
+    parser.add_argument("--log-backup-count", type=int, default=5)
     return parser
 
 
@@ -556,7 +655,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         manager = OllamaClusterManager.from_sources(
-            config_path=args.config, allowed_root=args.allowed_root
+            config_path=args.config,
+            allowed_root=args.allowed_root,
+            debug=args.debug,
+            log_file=args.log_file,
+            log_max_bytes=args.log_max_bytes,
+            log_backup_count=args.log_backup_count,
         )
         if args.action == "status_check":
             result = manager.status_check()
